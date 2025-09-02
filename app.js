@@ -845,6 +845,11 @@ function viewArticles() {
       <div class="row"><button class="btn" type="submit">記事を保存</button></div>
     </form>
     <div id="artList" class="grid" style="margin-top:1rem;"></div>
+    <details class="card" id="artSearchPane" style="margin-top:.75rem;"><summary>記事を検索</summary>
+      <div class="row" style="gap:.5rem;flex-wrap:wrap;margin-top:.5rem;">
+        <input id="artSearch" placeholder="記事を検索（タイトル/本文）" style="flex:1;min-width:240px;"/>
+      </div>
+    </details>
   `;
   div.appendChild(panel('記事', content));
   setTimeout(() => setupArticles(), 0);
@@ -855,16 +860,6 @@ async function setupArticles() {
   const { collection, query, where, getDocs, addDoc, serverTimestamp } = fb.fs;
   const listEl = qs('#artList');
   const form = qs('#artForm');
-  // 検索欄を追加（存在しなければ）
-  if (!qs('#artSearch')) {
-    const cont = qs('#app .window');
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.style.marginBottom = '.5rem';
-    row.innerHTML =
-      '<input id="artSearch" placeholder="記事を検索（タイトル/本文）" style="flex:1;min-width:240px;"/>';
-    cont?.insertBefore(row, cont.children[1]);
-  }
   const search = qs('#artSearch');
   async function refresh() {
     const uidNow = fb.user?.uid;
