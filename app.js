@@ -219,6 +219,11 @@ async function initFirebase() {
       linkWithCredential,
       signInWithEmailAndPassword,
       signOut,
+      GoogleAuthProvider,
+      signInWithPopup,
+      linkWithPopup,
+      signInWithRedirect,
+      linkWithRedirect,
     },
     firestore,
   ] = await Promise.all([
@@ -271,6 +276,17 @@ async function initFirebase() {
   fb.db = initializeFirestore(fb.app, {
     localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
   });
+  fb.authApi = {
+    EmailAuthProvider,
+    linkWithCredential,
+    signInWithEmailAndPassword,
+    signOut,
+    GoogleAuthProvider,
+    signInWithPopup,
+    linkWithPopup,
+    signInWithRedirect,
+    linkWithRedirect,
+  };
 
   onAuthStateChanged(fb.auth, async (user) => {
     if (!user) {
@@ -868,6 +884,10 @@ function viewProfile() {
         <input id="linkPass" type="password" placeholder="パスワード（8文字以上推奨）" required style="min-width:200px;flex:1;" />
         <button class="btn" type="submit">アカウント固定（メール連携）</button>
       </form>
+      <div class="row" style="margin-top:.5rem;gap:.5rem;">
+        <button id="linkGoogle" class="btn">Googleでアカウント固定</button>
+        <button id="signinGoogle" class="btn secondary">Googleでサインイン</button>
+      </div>
       <details style="margin-top:.5rem;"><summary>既存アカウントにサインイン</summary>
         <form id="signinForm" class="row" style="gap:.5rem;flex-wrap:wrap;margin-top:.5rem;">
           <input id="signinEmail" type="email" placeholder="メールアドレス" required style="min-width:240px;flex:1;" />
@@ -906,8 +926,8 @@ function setupProfileAuth() {
       const pass = qs('#linkPass').value;
       if (!email || !pass) return;
       try {
-        const cred = EmailAuthProvider.credential(email, pass);
-        await linkWithCredential(fb.auth.currentUser, cred);
+        const cred = fb.authApi.EmailAuthProvider.credential(email, pass);
+        await fb.authApi.linkWithCredential(fb.auth.currentUser, cred);
         showMsg(
           'アカウントをメールにリンクしました。今後は他端末でこのメール/パスワードで同じデータにアクセスできます。',
         );
@@ -929,7 +949,7 @@ function setupProfileAuth() {
       const pass = qs('#signinPass').value;
       if (!email || !pass) return;
       try {
-        await signInWithEmailAndPassword(fb.auth, email, pass);
+        await fb.authApi.signInWithEmailAndPassword(fb.auth, email, pass);
         showMsg('サインインしました。');
         render();
       } catch (err) {
@@ -941,12 +961,57 @@ function setupProfileAuth() {
   if (signoutBtn) {
     signoutBtn.addEventListener('click', async () => {
       try {
-        await signOut(fb.auth);
+        await fb.authApi.signOut(fb.auth);
         showMsg('サインアウトしました。');
         // 再度匿名で入れるよう初期化
         initFirebase();
       } catch (err) {
         showMsg('サインアウト失敗: ' + (err?.message || err), true);
+      }
+    });
+  }
+
+  const linkGoogleBtn = qs('#linkGoogle');
+  if (linkGoogleBtn) {
+    linkGoogleBtn.addEventListener('click', async () => {
+      try {
+        const provider = new fb.authApi.GoogleAuthProvider();
+        await fb.authApi.linkWithPopup(fb.auth.currentUser, provider);
+        showMsg('Googleアカウントにリンクしました。他端末でも同じデータを使用できます。');
+        render();
+      } catch (err) {
+        if (String(err?.code || '').includes('popup-blocked')) {
+          const provider = new fb.authApi.GoogleAuthProvider();
+          await fb.authApi.linkWithRedirect(fb.auth.currentUser, provider);
+        } else if (
+          String(err?.code || '').includes('credential-already-in-use') ||
+          String(err?.code || '').includes('account-exists-with-different-credential')
+        ) {
+          showMsg(
+            'このGoogleアカウントは既に使用されています。「Googleでサインイン」をお試しください。',
+            true,
+          );
+        } else {
+          showMsg('Googleリンクに失敗しました: ' + (err?.message || err), true);
+        }
+      }
+    });
+  }
+  const signinGoogleBtn = qs('#signinGoogle');
+  if (signinGoogleBtn) {
+    signinGoogleBtn.addEventListener('click', async () => {
+      try {
+        const provider = new fb.authApi.GoogleAuthProvider();
+        await fb.authApi.signInWithPopup(fb.auth, provider);
+        showMsg('Googleでサインインしました。');
+        render();
+      } catch (err) {
+        if (String(err?.code || '').includes('popup-blocked')) {
+          const provider = new fb.authApi.GoogleAuthProvider();
+          await fb.authApi.signInWithRedirect(fb.auth, provider);
+        } else {
+          showMsg('Googleサインインに失敗しました: ' + (err?.message || err), true);
+        }
       }
     });
   }
