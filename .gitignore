@@ -15,8 +15,10 @@ yarn-error.log*
 # local env
 .env
 .env.*
-config.js
+# ローカル専用設定は config.local.js などを利用
+# Firebaseのクライアント設定は公開可のため、config.js はコミット対象に含めます
+# config.js
+config.local.js
 
 # macOS
 .DS_Store
-
