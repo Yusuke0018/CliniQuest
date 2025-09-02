@@ -1359,10 +1359,13 @@ async function fetchRandomQa() {
   } else if (mode === 'age') {
     const minDays = Number(filters.ageDays || 0);
     docs = docs.filter((d) => {
-      const srs = d.data().srs;
-      const due = srs?.nextDueYmd || today;
-      const diff = ymdDiff(today, due);
-      return diff >= minDays;
+      const v = d.data();
+      const ts = (v.srs?.lastReviewedAt && v.srs.lastReviewedAt.toDate
+        ? v.srs.lastReviewedAt.toDate()
+        : null) || (v.createdAt && v.createdAt.toDate ? v.createdAt.toDate() : null);
+      const baseYmd = ts ? getJstYmd(ts) : today;
+      const diff = ymdDiff(today, baseYmd);
+      return diff >= minDays; // 最終学習/作成からの経過日数
     });
   }
   if (!docs.length) return null;
@@ -1499,16 +1502,21 @@ function setupStudy() {
   studyMode?.addEventListener('change', () => {
     state.session.filters.studyMode = studyMode.value;
     state.session.filters.dueOnly = studyMode.value === 'due';
-    if (ageDays) ageDays.disabled = studyMode.value !== 'age';
+    if (ageDays) {
+      ageDays.disabled = studyMode.value !== 'age';
+      if (!ageDays.disabled) setTimeout(() => ageDays.focus(), 0);
+    }
     state.session.history = [];
     load();
   });
-  ageDays?.addEventListener('change', () => {
+  const onAgeDaysUpdate = () => {
     const v = Math.max(0, Math.min(365, Number(ageDays.value || 0)));
     state.session.filters.ageDays = v;
     state.session.history = [];
     load();
-  });
+  };
+  ageDays?.addEventListener('change', onAgeDaysUpdate);
+  ageDays?.addEventListener('input', onAgeDaysUpdate);
   articleFilter?.addEventListener('change', () => {
     state.session.filters.articleId = articleFilter.value.trim() || null;
     state.session.history = [];
