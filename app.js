@@ -209,12 +209,23 @@ async function initFirebase() {
     console.warn('Firebase 未設定です。config.js を用意してください。');
     return;
   }
-  const [{ initializeApp }, { getAuth, onAuthStateChanged, signInAnonymously }, firestore] =
-    await Promise.all([
-      import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js'),
-      import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js'),
-      import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js'),
-    ]);
+  const [
+    { initializeApp },
+    {
+      getAuth,
+      onAuthStateChanged,
+      signInAnonymously,
+      EmailAuthProvider,
+      linkWithCredential,
+      signInWithEmailAndPassword,
+      signOut,
+    },
+    firestore,
+  ] = await Promise.all([
+    import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js'),
+    import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js'),
+    import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js'),
+  ]);
 
   const {
     initializeFirestore,
@@ -840,14 +851,105 @@ function viewProfile() {
   const div = document.createElement('div');
   const uid = fb.user?.uid ? fb.user.uid.slice(0, 8) : '-';
   const u = state.userDoc;
+  const isAnon = fb.user?.isAnonymous ?? true;
+  const email = fb.user?.email || '';
   const content = `
     <div class="grid cols-2">
       <div class="card">ユーザーID: <code>${uid}</code><br/>サインイン: 匿名</div>
       <div class="card">総XP: ${u?.totalXp ?? 0} ／ 正解: ${u?.totalCorrect ?? 0} ／ 作問: ${u?.totalCreated ?? 0}</div>
     </div>
+    <div class="card" style="margin-top:.75rem;">
+      ${
+        isAnon
+          ? `
+      <div style="margin-bottom:.5rem;">この端末は匿名アカウントです。メールにリンクするとUIDが固定され、他端末でも同じデータにアクセスできます。</div>
+      <form id="linkForm" class="row" style="gap:.5rem;flex-wrap:wrap;">
+        <input id="linkEmail" type="email" placeholder="メールアドレス" required style="min-width:240px;flex:1;" />
+        <input id="linkPass" type="password" placeholder="パスワード（8文字以上推奨）" required style="min-width:200px;flex:1;" />
+        <button class="btn" type="submit">アカウント固定（メール連携）</button>
+      </form>
+      <details style="margin-top:.5rem;"><summary>既存アカウントにサインイン</summary>
+        <form id="signinForm" class="row" style="gap:.5rem;flex-wrap:wrap;margin-top:.5rem;">
+          <input id="signinEmail" type="email" placeholder="メールアドレス" required style="min-width:240px;flex:1;" />
+          <input id="signinPass" type="password" placeholder="パスワード" required style="min-width:200px;flex:1;" />
+          <button class="btn secondary" type="submit">サインイン</button>
+        </form>
+      </details>
+      `
+          : `
+      <div>メール: <b>${email}</b></div>
+      <div class="row" style="margin-top:.5rem;">
+        <button id="signoutBtn" class="btn secondary">サインアウト</button>
+      </div>
+      `
+      }
+      <div id="authMsg" class="muted" style="margin-top:.5rem;"></div>
+    </div>
   `;
   div.appendChild(panel('プロフィール', content));
+  setTimeout(() => setupProfileAuth(), 0);
   return div;
+}
+
+function setupProfileAuth() {
+  const msg = qs('#authMsg');
+  const showMsg = (t, isErr = false) => {
+    if (!msg) return;
+    msg.textContent = t;
+    msg.style.color = isErr ? '#f79393' : '#9fc1ff';
+  };
+  const linkForm = qs('#linkForm');
+  if (linkForm) {
+    linkForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = qs('#linkEmail').value.trim();
+      const pass = qs('#linkPass').value;
+      if (!email || !pass) return;
+      try {
+        const cred = EmailAuthProvider.credential(email, pass);
+        await linkWithCredential(fb.auth.currentUser, cred);
+        showMsg(
+          'アカウントをメールにリンクしました。今後は他端末でこのメール/パスワードで同じデータにアクセスできます。',
+        );
+        render();
+      } catch (err) {
+        if (String(err?.code || '').includes('credential-already-in-use')) {
+          showMsg('このメールは既に使用されています。下の「サインイン」をお試しください。', true);
+        } else {
+          showMsg('リンクに失敗しました: ' + (err?.message || err), true);
+        }
+      }
+    });
+  }
+  const signinForm = qs('#signinForm');
+  if (signinForm) {
+    signinForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = qs('#signinEmail').value.trim();
+      const pass = qs('#signinPass').value;
+      if (!email || !pass) return;
+      try {
+        await signInWithEmailAndPassword(fb.auth, email, pass);
+        showMsg('サインインしました。');
+        render();
+      } catch (err) {
+        showMsg('サインインに失敗しました: ' + (err?.message || err), true);
+      }
+    });
+  }
+  const signoutBtn = qs('#signoutBtn');
+  if (signoutBtn) {
+    signoutBtn.addEventListener('click', async () => {
+      try {
+        await signOut(fb.auth);
+        showMsg('サインアウトしました。');
+        // 再度匿名で入れるよう初期化
+        initFirebase();
+      } catch (err) {
+        showMsg('サインアウト失敗: ' + (err?.message || err), true);
+      }
+    });
+  }
 }
 
 // 初期化
