@@ -706,10 +706,11 @@ const routes = {
   '/article': viewArticle,
   '/create': viewCreate,
   '/study': viewStudy,
+  '/summary': viewSummary,
   '/profile': viewProfile,
 };
 // スワイプナビゲーションの順序（ループ）
-const NAV_ORDER = ['/home', '/articles', '/create', '/study', '/profile'];
+const NAV_ORDER = ['/home', '/articles', '/create', '/study', '/summary', '/profile'];
 
 function getPath() {
   const h = location.hash || '#/home';
@@ -1284,6 +1285,72 @@ function viewStudy() {
   div.appendChild(panel('学習', content));
   setTimeout(() => setupStudy(), 0);
   return div;
+}
+
+function viewSummary() {
+  const div = document.createElement('div');
+  const u = state.userDoc;
+  const level = u?.level ?? 1;
+  const totalXp = u?.totalXp ?? 0;
+  const streakCur = u?.streak?.current ?? 0;
+  const title = levelTitle(level);
+  const head = `
+    <div class="grid cols-2">
+      <div class="card">
+        <div>レベル: <b>${level}</b> ／ 総XP: <b>${totalXp}</b></div>
+        <div class="muted">称号: ${title} ／ ストリーク: ${streakCur} 日</div>
+      </div>
+      <div class="card">
+        <div>総正解: ${u?.totalCorrect ?? 0} ／ 総作問: ${u?.totalCreated ?? 0}</div>
+      </div>
+    </div>
+  `;
+  const body = `
+    <div class="card" style="margin-top:.75rem;">
+      <div class="muted" style="margin-bottom:.25rem;">直近の活動（14日）</div>
+      <div id="sumTable" class="muted">読み込み中...</div>
+    </div>
+  `;
+  div.appendChild(panel('サマリー', head + body));
+  setTimeout(() => loadSummary(), 0);
+  return div;
+
+  async function loadSummary() {
+    const uid = fb.user?.uid;
+    if (!uid) return;
+    const { collection, query, where, orderBy, limit, getDocs } = fb.fs;
+    try {
+      const snap = await getDocs(
+        query(
+          collection(fb.db, 'logs_daily'),
+          where('uid', '==', uid),
+          orderBy('ymd', 'desc'),
+          limit(14),
+        ),
+      );
+      const rows = snap.docs
+        .map((d) => d.data())
+        .map((d) => {
+          const ymd = d.ymd || '';
+          const fmt = ymd ? `${ymd.slice(0, 4)}/${ymd.slice(4, 6)}/${ymd.slice(6, 8)}` : '-';
+          const created = d.created ?? 0;
+          const correct = d.correct ?? 0;
+          const xp = d.xp ?? 0;
+          return `<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--border);padding:.25rem 0;">
+            <div style="min-width:7.5rem;">${fmt}</div>
+            <div>作問: <b>${created}</b></div>
+            <div>正解: <b>${correct}</b></div>
+            <div>XP: <b>${xp}</b></div>
+          </div>`;
+        })
+        .join('');
+      const el = qs('#sumTable');
+      el.innerHTML = rows || '<div class="muted">記録がありません。</div>';
+    } catch (e) {
+      const el = qs('#sumTable');
+      if (el) el.textContent = '読み込みに失敗しました';
+    }
+  }
 }
 
 function setupStudy() {
