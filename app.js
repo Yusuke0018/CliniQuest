@@ -550,7 +550,8 @@ function nextStreak(streak, todayYmd) {
 
 function logsDailyDocRef(uid, ymd) {
   const { doc } = fb.fs;
-  return doc(fb.db, 'logs_daily', `${uid}_${ymd}`);
+  // users/{uid}/logs_daily/{ymd} に保存（権限管理しやすくする）
+  return doc(fb.db, 'users', uid, 'logs_daily', ymd);
 }
 
 async function createQaAndAward(q, a, r, tagsCsv, articleIdArg = null) {
@@ -1240,12 +1241,11 @@ function viewSummary() {
   async function loadSummary() {
     const uid = fb.user?.uid;
     if (!uid) return;
-    const { collection, query, where, orderBy, limit, getDocs } = fb.fs;
+    const { collection, query, orderBy, limit, getDocs } = fb.fs;
     try {
       const snap = await getDocs(
         query(
-          collection(fb.db, 'logs_daily'),
-          where('uid', '==', uid),
+          collection(fb.db, 'users', uid, 'logs_daily'),
           orderBy('ymd', 'desc'),
           limit(14),
         ),
