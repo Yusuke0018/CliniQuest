@@ -207,6 +207,13 @@ select:focus {
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
   opacity: 0.98;
 }
+/* Dark (DQ) モード時のトースト可読性改善 */
+[data-theme='dark'] .toast {
+  background: #0b1f3f;
+  color: #eaf2ff;
+  border: 1px solid #6aa7ff;
+  box-shadow: 0 10px 28px rgba(12, 26, 61, 0.55);
+}
 .dq {
   white-space: pre-line;
   line-height: 1.6;
@@ -377,7 +384,28 @@ select:focus {
   border-color: #2a59a8;
   color: #dbe8ff;
 }
+[data-theme='dark'] .btn:hover {
+  filter: brightness(1.08);
+}
+[data-theme='dark'] .btn.ok {
+  background: #169a4a;
+  border-color: #34d399;
+}
+[data-theme='dark'] .btn.ng {
+  background: #c62828;
+  border-color: #f87171;
+}
 [data-theme='dark'] .footer {
   background: #0b2550;
   border-top: 1px solid #163f7d;
+}
+/* Dark (DQ) モード時のバナー可読性改善 */
+[data-theme='dark'] .banner {
+  background: #3a0e0e;
+  color: #fecaca;
+  border-bottom: 1px solid #7f1d1d;
+}
+/* details/summary 可読性 */
+[data-theme='dark'] details summary {
+  color: var(--text);
 }
