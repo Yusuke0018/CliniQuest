@@ -1328,17 +1328,9 @@ function viewSummary() {
   async function loadSummary() {
     const uid = fb.user?.uid;
     if (!uid) return;
-    const { collection, query, orderBy, limit, getDocs } = fb.fs;
-    try {
-      const snap = await getDocs(
-        query(
-          collection(fb.db, 'users', uid, 'logs_daily'),
-          orderBy('ymd', 'desc'),
-          limit(14),
-        ),
-      );
-      const rows = snap.docs
-        .map((d) => d.data())
+    const { collection, query, orderBy, limit, getDocs, getDoc, doc } = fb.fs;
+    const renderRows = (items) =>
+      items
         .map((d) => {
           const ymd = d.ymd || '';
           const fmt = ymd ? `${ymd.slice(0, 4)}/${ymd.slice(4, 6)}/${ymd.slice(6, 8)}` : '-';
@@ -1353,11 +1345,36 @@ function viewSummary() {
           </div>`;
         })
         .join('');
-      const el = qs('#sumTable');
-      el.innerHTML = rows || '<div class="muted">記録がありません。</div>';
+    const el = qs('#sumTable');
+    try {
+      const snap = await getDocs(
+        query(
+          collection(fb.db, 'users', uid, 'logs_daily'),
+          orderBy('ymd', 'desc'),
+          limit(14),
+        ),
+      );
+      const items = snap.docs.map((d) => d.data());
+      el.innerHTML = items.length ? renderRows(items) : '<div class="muted">記録がありません。</div>';
     } catch (e) {
-      const el = qs('#sumTable');
-      if (el) el.textContent = '読み込みに失敗しました';
+      try {
+        const today = getJstYmd();
+        const base = ymdToJstDate(today);
+        const ymList = Array.from({ length: 14 }, (_, i) => {
+          const d = new Date(base.getTime() - i * 24 * 3600 * 1000);
+          return getJstYmd(d);
+        });
+        const snaps = await Promise.all(
+          ymList.map((ymd) => getDoc(doc(fb.db, 'users', uid, 'logs_daily', ymd)).catch(() => null)),
+        );
+        const items = snaps
+          .filter((s) => s && s.exists())
+          .map((s) => s.data())
+          .sort((a, b) => (a.ymd < b.ymd ? 1 : -1));
+        el.innerHTML = items.length ? renderRows(items) : '<div class="muted">記録がありません。</div>';
+      } catch (e2) {
+        el.textContent = '記録がありません。';
+      }
     }
   }
 }
