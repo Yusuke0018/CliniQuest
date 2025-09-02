@@ -975,6 +975,17 @@ async function deleteArticleById(articleId, cascade = false) {
   }
   await deleteDoc(doc(fb.db, 'articles', articleId));
 }
+async function deleteQaById(qaId) {
+  const { doc, getDoc, deleteDoc } = fb.fs;
+  const uid = fb.user?.uid;
+  if (!uid) throw new Error('未サインイン');
+  const ref = doc(fb.db, 'qas', qaId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  if (data.uid !== uid) throw new Error('権限がありません');
+  await deleteDoc(ref);
+}
 
 function viewArticle() {
   const div = document.createElement('div');
@@ -1124,6 +1135,14 @@ function viewCreate() {
       </div>
     </form>
     <p class="muted">保存すると一度だけ +5XP が付与されます。</p>
+    <div class="card" style="margin-top:1rem;">
+      <div class="row" style="gap:.5rem; margin-bottom:.5rem; flex-wrap:wrap;">
+        <input id="qaSearch" placeholder="問題を検索（Q/Aを対象）" style="flex:1;min-width:240px;"/>
+        <input id="qaArticleFilter" placeholder="記事IDで絞込（任意）" style="min-width:200px;"/>
+        <button id="qaClearFilter" class="btn secondary">絞り込み解除</button>
+      </div>
+      <div id="qaList" class="grid"></div>
+    </div>
   `;
   div.appendChild(panel('問題を作成', content));
   setTimeout(() => {
@@ -1153,6 +1172,74 @@ function viewCreate() {
           alert('保存に失敗しました: ' + (err?.message || err));
         });
     });
+    // 一覧の初期化
+    const search = qs('#qaSearch');
+    const artFilter = qs('#qaArticleFilter');
+    const clearBtn = qs('#qaClearFilter');
+    if (state.session.filters.articleId) artFilter.value = state.session.filters.articleId;
+    clearBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      search.value = '';
+      artFilter.value = '';
+      state.session.filters.articleId = null;
+      refreshQaList();
+    });
+    search?.addEventListener('input', () => refreshQaList());
+    artFilter?.addEventListener('change', () => {
+      state.session.filters.articleId = artFilter.value.trim() || null;
+      refreshQaList();
+    });
+    window.CLQ_deleteQa = async (id) => {
+      if (!confirm('この問題を削除します。よろしいですか？')) return;
+      try {
+        await deleteQaById(id);
+        showToast && showToast('問題を削除しました');
+        refreshQaList();
+      } catch (e) {
+        alert('削除に失敗しました: ' + (e?.message || e));
+      }
+    };
+    window.CLQ_setArticleFromQa = (articleId) => {
+      state.session.filters.articleId = articleId || null;
+      location.hash = '#/study';
+    };
+    async function refreshQaList() {
+      const uid = fb.user?.uid;
+      if (!uid) return;
+      const listEl = qs('#qaList');
+      if (!listEl) return;
+      listEl.innerHTML = '<div class="muted">読み込み中...</div>';
+      const term = (search?.value || '').trim().toLowerCase();
+      const articleId = (artFilter?.value || '').trim();
+      const { collection, query, where, getDocs, orderBy, limit } = fb.fs;
+      let qCol = collection(fb.db, 'qas');
+      let q = query(qCol, where('uid', '==', uid), orderBy('createdAt', 'desc'), limit(100));
+      if (articleId)
+        q = query(
+          qCol,
+          where('uid', '==', uid),
+          where('articleId', '==', articleId),
+          orderBy('createdAt', 'desc'),
+          limit(100),
+        );
+      const snap = await getDocs(q);
+      const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const filtered = term
+        ? items.filter(
+            (it) =>
+              (it.question || '').toLowerCase().includes(term) ||
+              (it.answer || '').toLowerCase().includes(term) ||
+              (it.rationale || '').toLowerCase().includes(term),
+          )
+        : items;
+      listEl.innerHTML = filtered
+        .map(
+          (it) => `
+          <div class=\"card\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0,6)})</small></div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <a class=\"btn secondary\" href=\"#/study\" onclick=\"window.CLQ_setArticleFromQa('${it.articleId || ''}')\">この記事で出題</a>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`,
+        )
+        .join('');
+    }
+    refreshQaList();
   });
   return div;
 }
