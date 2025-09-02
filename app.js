@@ -936,22 +936,24 @@ async function setupArticles() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      // 記事作成時にも +5XP（1回のみ）
-      try {
-        await fb.fs.runTransaction(fb.db, async (tx) => {
+      // 記事作成時にも +5XP（記録用フラグはベストエフォート）
+      fb.fs
+        .runTransaction(fb.db, async (tx) => {
           const aSnap = await tx.get(artRef);
           if (!aSnap.exists()) return;
           const a = aSnap.data();
           if (a.createdXpAwarded) return;
           tx.update(artRef, { createdXpAwarded: true, updatedAt: serverTimestamp() });
-        });
+        })
+        .catch((e2) => console.warn('記事作成時のフラグ更新に失敗（継続）', e2));
+      try {
         await awardXp(5);
-      } catch (e2) {
-        console.warn('記事作成時のXP付与に失敗（継続）', e2);
+      } catch (e3) {
+        console.warn('記事作成時のXP付与に失敗', e3);
       }
       qs('#artTitle').value = '';
       qs('#artBody').value = '';
-      showToast && showToast('記事を保存しました');
+      showToast && showToast('記事を保存しました: +5XP');
       refresh();
     } catch (err) {
       console.error('記事保存エラー', err);
