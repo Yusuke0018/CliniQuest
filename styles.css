@@ -24,6 +24,9 @@ body {
   background: var(--bg);
   color: var(--text);
 }
+body.dq-font {
+  font-family: 'DotGothic16', 'Noto Sans JP', 'Roboto Mono', monospace;
+}
 .topbar {
   position: sticky;
   top: 0;
@@ -48,6 +51,10 @@ body {
 }
 .nav a:hover {
   background: var(--panel-2);
+}
+.nav a.active {
+  border-color: var(--accent);
+  background: #eef2ff;
 }
 .nav a.active {
   border-color: var(--accent);
@@ -167,4 +174,60 @@ select:focus {
 }
 .muted {
   color: var(--muted);
+}
+
+/* --- Dark (DQ) theme overrides --- */
+[data-theme='dark'] {
+  --bg: #000000;
+  --panel: #0b0b0b;
+  --panel-2: #121212;
+  --text: #e9f1ff;
+  --muted: #a9c3ff;
+  --accent: #ffd55e;
+  --border: #2a59a8;
+  --focus: #4f8cf7;
+  --ok: #6ee7a2;
+  --ng: #f79393;
+}
+[data-theme='dark'] .topbar {
+  background: var(--panel);
+  border-bottom: 1px solid #1f2a44;
+}
+[data-theme='dark'] .nav a {
+  border-color: #2a59a8;
+  color: var(--text);
+}
+[data-theme='dark'] .nav a.active {
+  background: #0f254a;
+  border-color: #6aa7ff;
+}
+[data-theme='dark'] .window {
+  background: linear-gradient(180deg, #0f2f60, #0b2550);
+  border: 2px solid #6aa7ff;
+  box-shadow: 0 0 0 3px #123a74 inset;
+}
+[data-theme='dark'] .card {
+  background: #0d2b55;
+  border-color: #2a59a8;
+}
+[data-theme='dark'] input,
+[data-theme='dark'] textarea,
+[data-theme='dark'] select {
+  background: #0e264a;
+  border: 1px solid #335a9e;
+  color: var(--text);
+}
+[data-theme='dark'] .btn {
+  background: #14386b;
+  border-color: #2a59a8;
+  color: var(--text);
+}
+[data-theme='dark'] .btn.secondary {
+  background: #1a2b46;
+  border-color: #2a59a8;
+  color: #dbe8ff;
+}
+[data-theme='dark'] .footer {
+  background: #0b2550;
+  border-top: 1px solid #163f7d;
 }

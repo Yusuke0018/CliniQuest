@@ -5,13 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>CliniQuest</title>
     <meta name="description" content="医学知識Q&A学習アプリ" />
-    <link rel="manifest" href="./manifest.webmanifest?v=20250902-4" />
+    <link rel="manifest" href="./manifest.webmanifest?v=20250902-6" />
     <meta name="theme-color" content="#0c2c57" />
-    <link rel="icon" href="./icons/icon-192.png?v=20250902-4" />
-    <link rel="apple-touch-icon" href="./icons/icon-180.png?v=20250902-4" />
-    <link rel="stylesheet" href="./styles.css?v=20250902-4" />
+    <link rel="icon" href="./icons/icon-192.png?v=20250902-6" />
+    <link rel="apple-touch-icon" href="./icons/icon-180.png?v=20250902-6" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css?v=20250902-6" />
     <!-- Firebase 設定（window.CLQ_FIREBASE_CONFIG を提供） -->
-    <script src="./config.js?v=20250902-4"></script>
+    <script src="./config.js?v=20250902-6"></script>
   </head>
   <body>
     <header class="topbar">
@@ -23,6 +29,8 @@
         <a href="#/study" data-route>学習</a>
         <a href="#/profile" data-route>プロフィール</a>
       </nav>
+      <div style="flex: 1"></div>
+      <button id="themeToggle" class="btn secondary" title="テーマ切替">🌙 ダーク(DQ)</button>
     </header>
 
     <main id="app" class="container"></main>
@@ -33,6 +41,6 @@
       <span id="onlineStatus" class="status"></span>
     </footer>
 
-    <script type="module" src="./app.js?v=20250902-4"></script>
+    <script type="module" src="./app.js?v=20250902-6"></script>
   </body>
 </html>

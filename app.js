@@ -40,6 +40,30 @@ window.addEventListener('online', updateOnline);
 window.addEventListener('offline', updateOnline);
 updateOnline();
 
+// -------- Theme (light/dark-DQ) toggle --------
+function applyTheme(theme) {
+  const body = document.body;
+  if (theme === 'dark') {
+    body.dataset.theme = 'dark';
+    body.classList.add('dq-font');
+  } else {
+    delete body.dataset.theme;
+    body.classList.remove('dq-font');
+  }
+  localStorage.setItem('clq.theme', theme);
+  const btn = qs('#themeToggle');
+  if (btn) btn.textContent = theme === 'dark' ? '🌞 ライト' : '🌙 ダーク(DQ)';
+}
+
+function initTheme() {
+  const saved = localStorage.getItem('clq.theme') || 'light';
+  applyTheme(saved);
+  qs('#themeToggle')?.addEventListener('click', () => {
+    const cur = (localStorage.getItem('clq.theme') || 'light') === 'dark' ? 'light' : 'dark';
+    applyTheme(cur);
+  });
+}
+
 // -------- Firebase (modular ESM via CDN) --------
 // config は 1) window.CLQ_FIREBASE_CONFIG (config.jsで定義) が優先、2) 下記の空プレースホルダ
 const firebaseConfig = window.CLQ_FIREBASE_CONFIG ?? {
@@ -1020,3 +1044,4 @@ function setupProfileAuth() {
 // 初期化
 render();
 initFirebase();
+initTheme();
