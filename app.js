@@ -1126,6 +1126,18 @@ function viewCreate() {
   const content = `
     <form id="createForm" class="grid">
       <div class="field"><label>記事タイトル（既存/新規）</label><input id="articleTitle" placeholder="例: 肺炎の初期対応"/></div>
+      <div class="row" style="gap:.5rem;align-items:center;flex-wrap:wrap;">
+        <div class="muted">紐づけ先: <b id="articleSelectedName">未選択</b></div>
+        <button id="openArticlePicker" type="button" class="btn secondary">記事から選ぶ</button>
+        <button id="clearArticleSelection" type="button" class="btn secondary">選択解除</button>
+      </div>
+      <div id="articlePicker" class="card" style="display:none;margin-top:.25rem;">
+        <div class="row" style="gap:.5rem;flex-wrap:wrap;">
+          <input id="articlePickSearch" placeholder="記事を検索（タイトル/本文）" style="flex:1;min-width:240px;"/>
+          <button id="closeArticlePicker" type="button" class="btn secondary">閉じる</button>
+        </div>
+        <div id="articlePickList" class="grid" style="margin-top:.5rem;"></div>
+      </div>
       <div class="field"><label>問題（Q）</label><textarea id="q" rows="3" required></textarea></div>
       <div class="field"><label>答え（A）</label><textarea id="a" rows="3" required></textarea></div>
       <div class="field"><label>解説（任意）</label><textarea id="r" rows="3"></textarea></div>
@@ -1147,14 +1159,90 @@ function viewCreate() {
   div.appendChild(panel('問題を作成', content));
   setTimeout(() => {
     const form = qs('#createForm');
+    const selectedNameEl = qs('#articleSelectedName');
+    const picker = qs('#articlePicker');
+    const openPicker = qs('#openArticlePicker');
+    const closePicker = qs('#closeArticlePicker');
+    const clearSel = qs('#clearArticleSelection');
+    const pickSearch = qs('#articlePickSearch');
+    const pickList = qs('#articlePickList');
+
+    // 既存選択の表示（セッションにあれば）
+    if (state.session.filters.articleId) {
+      const id0 = state.session.filters.articleId;
+      (async () => {
+        try {
+          const { doc, getDoc } = fb.fs;
+          const snap = await getDoc(doc(fb.db, 'articles', id0));
+          const t = snap.exists() ? (snap.data().title || id0) : id0;
+          selectedNameEl.textContent = t;
+          form.dataset.articleId = id0;
+          const at = qs('#articleTitle');
+          if (at && (!at.value || at.value.trim().length === 0)) at.value = t;
+        } catch {}
+      })();
+    }
+
+    function setArticleSelection(id, title) {
+      form.dataset.articleId = id || '';
+      selectedNameEl.textContent = title || '未選択';
+      if (title) qs('#articleTitle').value = title;
+      state.session.filters.articleId = id || null;
+    }
+
+    async function refreshArticlePicker() {
+      const uidNow = fb.user?.uid;
+      if (!uidNow || !pickList) return;
+      const term = (pickSearch?.value || '').trim().toLowerCase();
+      const { collection, query, where, getDocs } = fb.fs;
+      const snap = await getDocs(query(collection(fb.db, 'articles'), where('uid', '==', uidNow)));
+      const items = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((it) =>
+          term
+            ? (it.title || '').toLowerCase().includes(term) || (it.body || '').toLowerCase().includes(term)
+            : true,
+        )
+        .slice(0, 200);
+      pickList.innerHTML =
+        items
+          .map(
+            (it) => `
+        <div class="card">
+          <div><b>${it.title}</b> <small class="muted">(${it.id.slice(0,6)})</small></div>
+          <div class="muted" style="margin:.25rem 0;">${(it.body || '').slice(0, 80)}</div>
+          <div class="row">
+            <button type="button" class="btn" data-pick="${it.id}" data-title="${it.title}">この記事を紐づけ</button>
+            <a class="btn secondary" href="#/article?slug=${encodeURIComponent(it.slug)}">読む</a>
+          </div>
+        </div>`,
+          )
+          .join('') || '<div class="muted">（該当なし）</div>';
+      // ボタンにイベント付与
+      qsa('button[data-pick]', pickList).forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-pick');
+          const title = btn.getAttribute('data-title');
+          setArticleSelection(id, title);
+          picker.style.display = 'none';
+        });
+      });
+    }
+
+    openPicker?.addEventListener('click', () => {
+      picker.style.display = 'block';
+      refreshArticlePicker();
+      pickSearch?.focus();
+    });
+    closePicker?.addEventListener('click', () => (picker.style.display = 'none'));
+    clearSel?.addEventListener('click', () => setArticleSelection('', '未選択'));
+    pickSearch?.addEventListener('input', () => refreshArticlePicker());
     form?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const artTitle = qs('#articleTitle').value.trim();
-      let articleId = null;
-      if (artTitle) {
-        try {
-          articleId = await createOrGetArticleByTitle(artTitle);
-        } catch (e2) {}
+      let articleId = form?.dataset?.articleId || null;
+      if (!articleId && artTitle) {
+        try { articleId = await createOrGetArticleByTitle(artTitle); } catch (e2) {}
         if (articleId) state.session.filters.articleId = articleId;
       }
       const qv = qs('#q').value.trim();
