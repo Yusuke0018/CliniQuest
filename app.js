@@ -691,43 +691,61 @@ async function awardCorrectXpAndUpdate(totalCorrectDelta = 1) {
 
 // 任意XPを付与（正解/作問カウントは触らない）
 async function awardXp(addXp) {
-  const { doc, runTransaction, serverTimestamp } = fb.fs;
+  const { doc, runTransaction, serverTimestamp, updateDoc, setDoc } = fb.fs;
   const uid = fb.user?.uid;
   if (!uid || !addXp) return;
   const userRef = doc(fb.db, 'users', uid);
-  await runTransaction(fb.db, async (tx) => {
-    const snap = await tx.get(userRef);
-    if (!snap.exists()) return;
-    const u = snap.data();
-    const today = getJstYmd();
-    const ldRef = logsDailyDocRef(uid, today);
-    const prevXp = u.totalXp || 0;
-    const prevLevel = u.level || 1;
-    const newXp = prevXp + addXp;
-    const newLevel = computeLevel(newXp);
-    const inc = newLevel > prevLevel ? computeLevelUpIncrements(u.seed, prevLevel, newLevel) : null;
-    const newStreak = nextStreak(u.streak || { current: 0, best: 0, lastActiveYmd: null }, today);
-    const patch = {
-      totalXp: newXp,
-      level: newLevel,
-      streak: newStreak,
-      updatedAt: serverTimestamp(),
-    };
-    if (inc) {
-      patch.stats = {
-        knowledge: (u.stats?.knowledge || 0) + inc.knowledge,
-        judgment: (u.stats?.judgment || 0) + inc.judgment,
-        skill: (u.stats?.skill || 0) + inc.skill,
-        empathy: (u.stats?.empathy || 0) + inc.empathy,
+  // Ensure the user document exists
+  try { await ensureUserInitialized(); } catch {}
+  try {
+    await runTransaction(fb.db, async (tx) => {
+      const snap = await tx.get(userRef);
+      if (!snap.exists()) throw new Error('user not found');
+      const u = snap.data();
+      const today = getJstYmd();
+      const ldRef = logsDailyDocRef(uid, today);
+      const prevXp = u.totalXp || 0;
+      const prevLevel = u.level || 1;
+      const newXp = prevXp + addXp;
+      const newLevel = computeLevel(newXp);
+      const inc = newLevel > prevLevel ? computeLevelUpIncrements(u.seed, prevLevel, newLevel) : null;
+      const newStreak = nextStreak(u.streak || { current: 0, best: 0, lastActiveYmd: null }, today);
+      const patch = {
+        totalXp: newXp,
+        level: newLevel,
+        streak: newStreak,
+        updatedAt: serverTimestamp(),
       };
+      if (inc) {
+        patch.stats = {
+          knowledge: (u.stats?.knowledge || 0) + inc.knowledge,
+          judgment: (u.stats?.judgment || 0) + inc.judgment,
+          skill: (u.stats?.skill || 0) + inc.skill,
+          empathy: (u.stats?.empathy || 0) + inc.empathy,
+        };
+      }
+      tx.update(userRef, patch);
+      tx.set(
+        ldRef,
+        { uid, ymd: today, xp: fb.fs.increment(addXp), updatedAt: serverTimestamp() },
+        { merge: true },
+      );
+    });
+  } catch (err) {
+    // Fallback: increment XP only (level/stats will reflect later)
+    try {
+      const today = getJstYmd();
+      await updateDoc(userRef, { totalXp: fb.fs.increment(addXp), updatedAt: serverTimestamp() });
+      const ldRef = logsDailyDocRef(uid, today);
+      await setDoc(
+        ldRef,
+        { uid, ymd: today, xp: fb.fs.increment(addXp), updatedAt: serverTimestamp() },
+        { merge: true },
+      );
+    } catch (e2) {
+      console.warn('awardXp fallback failed', e2);
     }
-    tx.update(userRef, patch);
-    tx.set(
-      ldRef,
-      { uid, ymd: today, xp: fb.fs.increment(addXp), updatedAt: serverTimestamp() },
-      { merge: true },
-    );
-  });
+  }
 }
 
 // -------- Routing --------
