@@ -285,6 +285,49 @@ function computeLevelUpIncrements(seed, fromLevelExcl, toLevelIncl) {
   return inc;
 }
 
+// ---- JST ストリークと日次ログ補助 ----
+function getJstYmd(date = new Date()) {
+  const t = date.getTime() + 9 * 3600 * 1000; // +09:00
+  const d = new Date(t);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}${m}${day}`;
+}
+
+function ymdToJstDate(ymd) {
+  const y = Number(ymd.slice(0, 4));
+  const m = Number(ymd.slice(4, 6));
+  const d = Number(ymd.slice(6, 8));
+  const utc = Date.UTC(y, m - 1, d) - 9 * 3600 * 1000; // JST 0:00 をUTCへ
+  return new Date(utc);
+}
+
+function ymdDiff(a, b) {
+  const da = ymdToJstDate(a);
+  const db = ymdToJstDate(b);
+  return Math.round((da - db) / (24 * 3600 * 1000));
+}
+
+function nextStreak(streak, todayYmd) {
+  const last = streak?.lastActiveYmd || null;
+  if (!last) return { current: 1, best: 1, lastActiveYmd: todayYmd };
+  const diff = ymdDiff(todayYmd, last);
+  if (diff === 0)
+    return { current: streak.current || 1, best: streak.best || 1, lastActiveYmd: last };
+  if (diff === 1) {
+    const cur = (streak.current || 0) + 1;
+    const best = Math.max(streak.best || 0, cur);
+    return { current: cur, best, lastActiveYmd: todayYmd };
+  }
+  return { current: 1, best: Math.max(streak.best || 0, 1), lastActiveYmd: todayYmd };
+}
+
+function logsDailyDocRef(uid, ymd) {
+  const { doc } = fb.fs;
+  return doc(fb.db, 'logs_daily', `${uid}_${ymd}`);
+}
+
 async function createQaAndAward(q, a, r, tagsCsv) {
   const { collection, addDoc, serverTimestamp, doc, runTransaction } = fb.fs;
   const uid = fb.user?.uid;
@@ -320,10 +363,13 @@ async function createQaAndAward(q, a, r, tagsCsv) {
       const newLevel = computeLevel(newXp);
       const inc =
         newLevel > prevLevel ? computeLevelUpIncrements(u.seed, prevLevel, newLevel) : null;
+      const today = getJstYmd();
+      const newStreak = nextStreak(u.streak || { current: 0, best: 0, lastActiveYmd: null }, today);
       const patch = {
         totalXp: newXp,
         level: newLevel,
         totalCreated: (u.totalCreated || 0) + 1,
+        streak: newStreak,
         updatedAt: serverTimestamp(),
       };
       if (inc) {
@@ -336,6 +382,27 @@ async function createQaAndAward(q, a, r, tagsCsv) {
       }
       tx.update(userRef, patch);
       tx.update(qaRef, { createdXpAwarded: true, updatedAt: serverTimestamp() });
+      // logs_daily 集計
+      const ldRef = logsDailyDocRef(uid, today);
+      const ldSnap = await tx.get(ldRef);
+      if (ldSnap.exists()) {
+        const d = ldSnap.data();
+        tx.update(ldRef, {
+          created: (d.created || 0) + 1,
+          xp: (d.xp || 0) + addXp,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        tx.set(ldRef, {
+          uid,
+          ymd: today,
+          created: 1,
+          correct: 0,
+          xp: addXp,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
     }
   });
 }
@@ -357,10 +424,13 @@ async function awardCorrectXpAndUpdate(totalCorrectDelta = 1) {
     const newXp = prevXp + gain;
     const newLevel = computeLevel(newXp);
     const inc = newLevel > prevLevel ? computeLevelUpIncrements(seed, prevLevel, newLevel) : null;
+    const today = getJstYmd();
+    const newStreak = nextStreak(u.streak || { current: 0, best: 0, lastActiveYmd: null }, today);
     const patch = {
       totalXp: newXp,
       level: newLevel,
       totalCorrect: (u.totalCorrect || 0) + totalCorrectDelta,
+      streak: newStreak,
       updatedAt: serverTimestamp(),
     };
     if (inc) {
@@ -372,7 +442,29 @@ async function awardCorrectXpAndUpdate(totalCorrectDelta = 1) {
       };
     }
     tx.update(userRef, patch);
-    return { isCritical, gain };
+    // logs_daily 集計
+    const ldRef = logsDailyDocRef(uid, today);
+    const ldSnap = await tx.get(ldRef);
+    if (ldSnap.exists()) {
+      const d = ldSnap.data();
+      tx.update(ldRef, {
+        correct: (d.correct || 0) + 1,
+        xp: (d.xp || 0) + gain,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      tx.set(ldRef, {
+        uid,
+        ymd: today,
+        created: 0,
+        correct: 1,
+        xp: gain,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+    const leveledUp = newLevel > prevLevel;
+    return { isCritical, gain, leveledUp, levelAfter: newLevel };
   });
 }
 
@@ -526,7 +618,6 @@ function setupStudy() {
   const ok = qs('#okBtn');
   const ng = qs('#ngBtn');
   const log = qs('#log');
-  let current = null;
   async function load() {
     const qa = await fetchRandomQa();
     if (!qa) {
@@ -535,7 +626,6 @@ function setupStudy() {
       ok.style.display = ng.style.display = 'none';
       return;
     }
-    current = qa;
     state.session.history.push(qa.id);
     qText.textContent = qa.question;
     aText.textContent = '答え: ' + qa.answer + (qa.rationale ? `\n解説: ${qa.rationale}` : '');
@@ -551,10 +641,12 @@ function setupStudy() {
   };
   ok.onclick = async () => {
     try {
-      const { isCritical, gain } = await awardCorrectXpAndUpdate(1);
-      log.innerHTML = isCritical
+      const { isCritical, gain, leveledUp } = await awardCorrectXpAndUpdate(1);
+      const line1 = isCritical
         ? `<span class="crit">✨ 会心のいちげき！ ✨／けいけんちを ${gain} かくとく！</span>`
         : `<span>正解だった！／けいけんちを ${gain} かくとく！</span>`;
+      const line2 = leveledUp ? `<div>レベルが あがった！</div>` : '';
+      log.innerHTML = line1 + line2;
     } catch (e) {
       console.error(e);
       alert('更新に失敗しました: ' + (e?.message || e));
