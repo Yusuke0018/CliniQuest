@@ -1,11 +1,11 @@
 // Simple offline cache for essential assets
-const CACHE_NAME = 'cliniquest-v27';
+const CACHE_NAME = 'cliniquest-v28';
 const ASSETS = [
   './',
-  './index.html?v=20250902-26',
-  './styles.css?v=20250902-26',
-  './app.js?v=20250902-26',
-  './manifest.webmanifest?v=20250902-26',
+  './index.html?v=20250902-27',
+  './styles.css?v=20250902-27',
+  './app.js?v=20250902-27',
+  './manifest.webmanifest?v=20250902-27',
   './404.html',
   './fonts/DotGothic16.ttf',
 ];

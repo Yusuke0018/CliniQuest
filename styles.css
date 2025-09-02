@@ -93,7 +93,10 @@ body.dq-font {
 }
 .title {
   margin: 0.2rem 0 1rem 0;
-  color: var(--accent);
+  color: #d4a017; /* light: yellow/gold */
+}
+[data-theme='dark'] .title {
+  color: #ffd55e; /* dark(DQ): bright yellow */
 }
 .row {
   display: flex;
