@@ -77,42 +77,81 @@ function attachSwipeNav() {
     if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(t)) return true;
     return el.closest && el.closest('input,textarea,select,button,a,[contenteditable="true"]');
   };
+  const onStart = (x, y, target) => {
+    if (isInteractive(target)) {
+      tracking = false;
+      return;
+    }
+    startX = x;
+    startY = y;
+    tracking = true;
+  };
+  const onMove = (y) => {
+    if (!tracking) return;
+    const dy = y - startY;
+    if (Math.abs(dy) > 50) tracking = false; // 縦スクロール優先
+  };
+  const onEnd = (x, y) => {
+    if (!tracking) return;
+    tracking = false;
+    const dx = x - startX;
+    const dy = y - startY;
+    if (Math.abs(dy) > 50) return;
+    const threshold = 25;
+    if (dx <= -threshold) navigateRelative(1);
+    else if (dx >= threshold) navigateRelative(-1);
+  };
+  // Touch events
   document.addEventListener(
     'touchstart',
     (e) => {
       if (e.touches && e.touches.length > 1) return;
-      if (isInteractive(e.target)) {
-        tracking = false;
-        return;
-      }
       const t = e.touches ? e.touches[0] : e;
-      startX = t.clientX;
-      startY = t.clientY;
-      tracking = true;
+      onStart(t.clientX, t.clientY, e.target);
     },
     { passive: true },
   );
   document.addEventListener(
     'touchmove',
     (e) => {
-      if (!tracking) return;
       const t = e.touches ? e.touches[0] : e;
-      const dy = t.clientY - startY;
-      if (Math.abs(dy) > 40) tracking = false; // 縦スクロール優先
+      onMove(t.clientY);
     },
     { passive: true },
   );
-  document.addEventListener('touchend', (e) => {
-    if (!tracking) return;
-    tracking = false;
-    const t = e.changedTouches ? e.changedTouches[0] : e;
-    const dx = t.clientX - startX;
-    const dy = t.clientY - startY;
-    if (Math.abs(dy) > 40) return;
-    const threshold = 60;
-    if (dx <= -threshold) navigateRelative(1);
-    else if (dx >= threshold) navigateRelative(-1);
-  });
+  document.addEventListener(
+    'touchend',
+    (e) => {
+      const t = e.changedTouches ? e.changedTouches[0] : e;
+      onEnd(t.clientX, t.clientY);
+    },
+    { passive: true },
+  );
+  // Pointer events (for broader support)
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (e.pointerType !== 'touch') return;
+      onStart(e.clientX, e.clientY, e.target);
+    },
+    { passive: true },
+  );
+  document.addEventListener(
+    'pointermove',
+    (e) => {
+      if (e.pointerType !== 'touch') return;
+      onMove(e.clientY);
+    },
+    { passive: true },
+  );
+  document.addEventListener(
+    'pointerup',
+    (e) => {
+      if (e.pointerType !== 'touch') return;
+      onEnd(e.clientX, e.clientY);
+    },
+    { passive: true },
+  );
 }
 
 function navigateRelative(step) {
