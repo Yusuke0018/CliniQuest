@@ -235,7 +235,10 @@ const PERMS = (() => {
 
 const state = {
   userDoc: null,
-  session: { history: [], filters: { dueOnly: true, articleId: null } },
+  session: {
+    history: [],
+    filters: { dueOnly: true, articleId: null, studyMode: 'due', ageDays: 3 },
+  },
 };
 
 const titlesByLevel = new Map([
@@ -1346,12 +1349,22 @@ async function fetchRandomQa() {
     );
   const snap = await getDocs(q);
   let docs = snap.docs.filter((d) => !state.session.history.includes(d.id));
-  if (filters.dueOnly)
+  const mode = filters.studyMode || (filters.dueOnly ? 'due' : 'random');
+  if (mode === 'due') {
     docs = docs.filter((d) => {
       const srs = d.data().srs;
       if (!srs || !srs.nextDueYmd) return true;
       return srs.nextDueYmd <= today;
     });
+  } else if (mode === 'age') {
+    const minDays = Number(filters.ageDays || 0);
+    docs = docs.filter((d) => {
+      const srs = d.data().srs;
+      const due = srs?.nextDueYmd || today;
+      const diff = ymdDiff(today, due);
+      return diff >= minDays;
+    });
+  }
   if (!docs.length) return null;
   const pick = docs[Math.floor(Math.random() * docs.length)];
   return { id: pick.id, ...pick.data() };
@@ -1360,9 +1373,18 @@ async function fetchRandomQa() {
 function viewStudy() {
   const div = document.createElement('div');
   const content = `
-    <div class="row" style="margin-bottom:.5rem;">
+    <div class="row" style="margin-bottom:.5rem;gap:.5rem;flex-wrap:wrap;align-items:center;">
       <label style="display:inline-flex;align-items:center;gap:.35rem;">
-        <input type="checkbox" id="dueOnly" ${state.session.filters.dueOnly ? 'checked' : ''}/> 復習のみ
+        <span>出題モード</span>
+        <select id="studyMode">
+          <option value="due" ${state.session.filters.studyMode === 'due' ? 'selected' : ''}>復習（期日到来）</option>
+          <option value="random" ${state.session.filters.studyMode === 'random' ? 'selected' : ''}>ランダム（すべて）</option>
+          <option value="age" ${state.session.filters.studyMode === 'age' ? 'selected' : ''}>経過日数指定</option>
+        </select>
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:.35rem;">
+        <span>経過日数</span>
+        <input id="ageDays" type="number" min="0" max="365" step="1" value="${state.session.filters.ageDays || 3}" ${state.session.filters.studyMode === 'age' ? '' : 'disabled'} style="width:6rem;"/>
       </label>
       <input id="articleFilter" placeholder="記事ID（任意）" style="flex:1;min-width:240px;" value="${state.session.filters.articleId || ''}"/>
     </div>
@@ -1471,10 +1493,19 @@ function setupStudy() {
   const ok = qs('#okBtn');
   const ng = qs('#ngBtn');
   const log = qs('#log');
-  const dueOnly = qs('#dueOnly');
+  const studyMode = qs('#studyMode');
+  const ageDays = qs('#ageDays');
   const articleFilter = qs('#articleFilter');
-  dueOnly?.addEventListener('change', () => {
-    state.session.filters.dueOnly = !!dueOnly.checked;
+  studyMode?.addEventListener('change', () => {
+    state.session.filters.studyMode = studyMode.value;
+    state.session.filters.dueOnly = studyMode.value === 'due';
+    if (ageDays) ageDays.disabled = studyMode.value !== 'age';
+    state.session.history = [];
+    load();
+  });
+  ageDays?.addEventListener('change', () => {
+    const v = Math.max(0, Math.min(365, Number(ageDays.value || 0)));
+    state.session.filters.ageDays = v;
     state.session.history = [];
     load();
   });
