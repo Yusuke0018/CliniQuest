@@ -20,23 +20,32 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isOwner() {
-      return request.auth != null && request.auth.uid == resource.data.uid;
+    function isOwnerExisting() {
+      // 既存ドキュメントに対する参照（read/update/delete）
+      return request.auth != null && resource.data.uid == request.auth.uid;
+    }
+    function isOwnerCreating() {
+      // 新規作成時（create）は request.resource を参照
+      return request.auth != null && request.resource.data.uid == request.auth.uid;
     }
     match /users/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
     match /qas/{id} {
-      allow read, write: if isOwner();
+      allow create: if isOwnerCreating();
+      allow read, update, delete: if isOwnerExisting();
     }
     match /achievements/{id} {
-      allow read, write: if isOwner();
+      allow create: if isOwnerCreating();
+      allow read, update, delete: if isOwnerExisting();
     }
     match /sessions/{id} {
-      allow read, write: if isOwner();
+      allow create: if isOwnerCreating();
+      allow read, update, delete: if isOwnerExisting();
     }
-    match /logs_daily/{ymd} {
-      allow read, write: if isOwner();
+    match /logs_daily/{docId} {
+      allow create: if isOwnerCreating();
+      allow read, update, delete: if isOwnerExisting();
     }
   }
 }
