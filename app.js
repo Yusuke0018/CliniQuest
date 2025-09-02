@@ -40,6 +40,23 @@ window.addEventListener('online', updateOnline);
 window.addEventListener('offline', updateOnline);
 updateOnline();
 
+// -------- Force-clear caches on each load (developer preference) --------
+async function forceClearCaches() {
+  try {
+    if (!('caches' in window)) return;
+    const keys = await caches.keys();
+    await Promise.all(keys.map((k) => caches.delete(k)));
+    // Also trigger SW update if registered
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.update().catch(() => {})));
+    }
+  } catch (e) {
+    console.warn('Cache clear failed', e);
+  }
+}
+forceClearCaches();
+
 // -------- Theme (light/dark-DQ) toggle --------
 function applyTheme(theme) {
   const body = document.body;

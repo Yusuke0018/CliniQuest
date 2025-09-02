@@ -1,5 +1,5 @@
 // Simple offline cache for essential assets
-const CACHE_NAME = 'cliniquest-v10';
+const CACHE_NAME = 'cliniquest-v12';
 const ASSETS = [
   './',
   './index.html?v=20250902-8',
@@ -33,20 +33,29 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const { request } = e;
   if (request.method !== 'GET') return;
-  e.respondWith(
-    caches.match(request).then(
-      (cached) =>
-        cached ||
-        fetch(request)
-          .then((resp) => {
+  const isHtml = request.mode === 'navigate' || request.destination === 'document';
+  const isAsset = ['style', 'script', 'manifest', 'font', 'image'].includes(request.destination);
+
+  if (isHtml || request.destination === 'script' || request.destination === 'style') {
+    e.respondWith(fetch(request, { cache: 'no-store' }).catch(() => caches.match(request)));
+    return;
+  }
+  if (isAsset) {
+    e.respondWith(
+      caches.match(request).then(
+        (cached) =>
+          cached ||
+          fetch(request).then((resp) => {
             const copy = resp.clone();
             caches
               .open(CACHE_NAME)
               .then((c) => c.put(request, copy))
               .catch(() => {});
             return resp;
-          })
-          .catch(() => cached),
-    ),
-  );
+          }),
+      ),
+    );
+    return;
+  }
+  e.respondWith(fetch(request).catch(() => caches.match(request)));
 });
