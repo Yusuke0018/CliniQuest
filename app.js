@@ -64,6 +64,65 @@ function initTheme() {
   });
 }
 
+// -------- Mobile swipe navigation (左右スワイプで画面移動・ループ) --------
+function attachSwipeNav() {
+  const coarse = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : true;
+  if (!coarse) return;
+  let startX = 0;
+  let startY = 0;
+  let tracking = false;
+  const isInteractive = (el) => {
+    if (!el) return false;
+    const t = el.tagName;
+    if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(t)) return true;
+    return el.closest && el.closest('input,textarea,select,button,a,[contenteditable="true"]');
+  };
+  document.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.touches && e.touches.length > 1) return;
+      if (isInteractive(e.target)) {
+        tracking = false;
+        return;
+      }
+      const t = e.touches ? e.touches[0] : e;
+      startX = t.clientX;
+      startY = t.clientY;
+      tracking = true;
+    },
+    { passive: true },
+  );
+  document.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!tracking) return;
+      const t = e.touches ? e.touches[0] : e;
+      const dy = t.clientY - startY;
+      if (Math.abs(dy) > 40) tracking = false; // 縦スクロール優先
+    },
+    { passive: true },
+  );
+  document.addEventListener('touchend', (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const t = e.changedTouches ? e.changedTouches[0] : e;
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+    if (Math.abs(dy) > 40) return;
+    const threshold = 60;
+    if (dx <= -threshold) navigateRelative(1);
+    else if (dx >= threshold) navigateRelative(-1);
+  });
+}
+
+function navigateRelative(step) {
+  const path = getPath();
+  const idx = NAV_ORDER.indexOf(path);
+  const cur = idx >= 0 ? idx : 0;
+  const next = (cur + step + NAV_ORDER.length) % NAV_ORDER.length;
+  location.hash = '#' + NAV_ORDER[next];
+}
+
 // -------- Firebase (modular ESM via CDN) --------
 // config は 1) window.CLQ_FIREBASE_CONFIG (config.jsで定義) が優先、2) 下記の空プレースホルダ
 const firebaseConfig = window.CLQ_FIREBASE_CONFIG ?? {
@@ -581,6 +640,8 @@ const routes = {
   '/study': viewStudy,
   '/profile': viewProfile,
 };
+// スワイプナビゲーションの順序（ループ）
+const NAV_ORDER = ['/home', '/articles', '/create', '/study', '/profile'];
 
 function getPath() {
   const h = location.hash || '#/home';
@@ -1144,3 +1205,4 @@ function setupProfileAuth() {
 render();
 initFirebase();
 initTheme();
+attachSwipeNav();
