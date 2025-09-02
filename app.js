@@ -1051,29 +1051,20 @@ async function setupArticles() {
     e.preventDefault();
     const title = qs('#artTitle').value.trim();
     const body = qs('#artBody').value;
-    if (!title) {
-      alert('タイトルは必須です');
-      return;
-    }
+    if (!title) return;
     const slug = slugify(title);
-    try {
-      await addDoc(collection(fb.db, 'articles'), {
-        uid,
-        title,
-        slug,
-        body,
-        tags: [],
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      qs('#artTitle').value = '';
-      qs('#artBody').value = '';
-      showToast && showToast('記事を保存しました');
-      refresh();
-    } catch (err) {
-      console.error('記事保存エラー', err);
-      alert('記事の保存に失敗しました: ' + (err?.message || err));
-    }
+    await addDoc(collection(fb.db, 'articles'), {
+      uid,
+      title,
+      slug,
+      body,
+      tags: [],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    qs('#artTitle').value = '';
+    qs('#artBody').value = '';
+    refresh();
   });
   search?.addEventListener('input', () => refresh());
   refresh();
