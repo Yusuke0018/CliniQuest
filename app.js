@@ -1211,33 +1211,35 @@ function viewCreate() {
       listEl.innerHTML = '<div class="muted">読み込み中...</div>';
       const term = (search?.value || '').trim().toLowerCase();
       const articleId = (artFilter?.value || '').trim();
-      const { collection, query, where, getDocs, orderBy, limit } = fb.fs;
-      let qCol = collection(fb.db, 'qas');
-      let q = query(qCol, where('uid', '==', uid), orderBy('createdAt', 'desc'), limit(100));
-      if (articleId)
-        q = query(
-          qCol,
-          where('uid', '==', uid),
-          where('articleId', '==', articleId),
-          orderBy('createdAt', 'desc'),
-          limit(100),
-        );
-      const snap = await getDocs(q);
-      const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const filtered = term
-        ? items.filter(
+      const { collection, query, where, getDocs, limit } = fb.fs;
+      try {
+        const qCol = collection(fb.db, 'qas');
+        const q = query(qCol, where('uid', '==', uid), limit(100));
+        const snap = await getDocs(q);
+        let items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        if (articleId) items = items.filter((it) => (it.articleId || '') === articleId);
+        if (term)
+          items = items.filter(
             (it) =>
               (it.question || '').toLowerCase().includes(term) ||
               (it.answer || '').toLowerCase().includes(term) ||
               (it.rationale || '').toLowerCase().includes(term),
-          )
-        : items;
-      listEl.innerHTML = filtered
-        .map(
-          (it) => `
+          );
+        items.sort((a, b) => {
+          const ta = (a.createdAt && a.createdAt.toMillis) ? a.createdAt.toMillis() : 0;
+          const tb = (b.createdAt && b.createdAt.toMillis) ? b.createdAt.toMillis() : 0;
+          return tb - ta;
+        });
+        listEl.innerHTML = items
+          .map(
+            (it) => `
           <div class=\"card\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0,6)})</small></div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <a class=\"btn secondary\" href=\"#/study\" onclick=\"window.CLQ_setArticleFromQa('${it.articleId || ''}')\">この記事で出題</a>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`,
-        )
-        .join('');
+          )
+          .join('') || '<div class="muted">（該当なし）</div>';
+      } catch (err) {
+        console.error('QA一覧の取得に失敗', err);
+        listEl.innerHTML = '<div class="muted">読み込みに失敗しました</div>';
+      }
     }
     refreshQaList();
   });
