@@ -1085,13 +1085,73 @@ function viewArticle() {
       saveBtn?.addEventListener('click', async () => {
         try {
           const body = qs('#editBody', wrap).value;
-          const { doc, updateDoc, serverTimestamp } = fb.fs;
+          const { doc, updateDoc, serverTimestamp, runTransaction } = fb.fs;
           await updateDoc(doc(fb.db, 'articles', article.id), {
             body,
             updatedAt: serverTimestamp(),
           });
+          // 記事保存時に +5XP 付与
+          const uidNow = fb.user?.uid;
+          if (uidNow) {
+            try {
+              await runTransaction(fb.db, async (tx) => {
+                const userRef = doc(fb.db, 'users', uidNow);
+                const uSnap = await tx.get(userRef);
+                if (!uSnap.exists()) return;
+                const u = uSnap.data();
+                const addXp = 5;
+                const prevXp = u.totalXp || 0;
+                const prevLevel = u.level || 1;
+                const newXp = prevXp + addXp;
+                const newLevel = computeLevel(newXp);
+                const inc =
+                  newLevel > prevLevel
+                    ? computeLevelUpIncrements(u.seed, prevLevel, newLevel)
+                    : null;
+                const today = getJstYmd();
+                const newStreak = nextStreak(
+                  u.streak || { current: 0, best: 0, lastActiveYmd: null },
+                  today,
+                );
+                const patch = {
+                  totalXp: newXp,
+                  level: newLevel,
+                  streak: newStreak,
+                  updatedAt: serverTimestamp(),
+                };
+                if (inc) {
+                  patch.stats = {
+                    knowledge: (u.stats?.knowledge || 0) + inc.knowledge,
+                    judgment: (u.stats?.judgment || 0) + inc.judgment,
+                    skill: (u.stats?.skill || 0) + inc.skill,
+                    empathy: (u.stats?.empathy || 0) + inc.empathy,
+                  };
+                }
+                tx.update(userRef, patch);
+                // 日次ログのXPだけ加算（作問カウントはQ/Aに限定）
+                const ldRef = logsDailyDocRef(uidNow, today);
+                const ldSnap = await tx.get(ldRef);
+                if (ldSnap.exists()) {
+                  const d = ldSnap.data();
+                  tx.update(ldRef, { xp: (d.xp || 0) + addXp, updatedAt: serverTimestamp() });
+                } else {
+                  tx.set(ldRef, {
+                    uid: uidNow,
+                    ymd: today,
+                    created: 0,
+                    correct: 0,
+                    xp: addXp,
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                  });
+                }
+              });
+            } catch (e2) {
+              console.warn('記事保存時のXP付与に失敗（継続）', e2);
+            }
+          }
           // 再描画
-          showToast && showToast('記事を保存しました');
+          showToast && showToast('記事を保存しました: +5XP');
           location.hash = `#/article?slug=${encodeURIComponent(article.slug)}`;
         } catch (err) {
           alert('保存に失敗しました: ' + (err?.message || err));
