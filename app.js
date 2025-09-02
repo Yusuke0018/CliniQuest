@@ -576,6 +576,7 @@ async function awardCorrectXpAndUpdate(totalCorrectDelta = 1) {
 const routes = {
   '/home': viewHome,
   '/articles': viewArticles,
+  '/article': viewArticle,
   '/create': viewCreate,
   '/study': viewStudy,
   '/profile': viewProfile,
@@ -587,6 +588,15 @@ function getPath() {
     return new URL(h.replace('#', ''), location.origin).pathname;
   } catch {
     return '/home';
+  }
+}
+
+function getQuery() {
+  const h = location.hash || '#/home';
+  try {
+    return new URL(h.replace('#', ''), location.origin).searchParams;
+  } catch {
+    return new URLSearchParams();
   }
 }
 
@@ -686,9 +696,12 @@ async function setupArticles() {
       .map(
         (it) => `
       <div class="card">
-        <div><b>${it.title}</b> <small class="muted">(${it.id.slice(0, 6)})</small></div>
+        <div><b><a href="#/article?slug=${encodeURIComponent(it.slug)}">${it.title}</a></b> <small class="muted">(${it.id.slice(0, 6)})</small></div>
         <div class="muted" style="margin:.25rem 0;">${(it.body || '').slice(0, 100)}</div>
-        <div class="row"><a class="btn secondary" href="#/study" onclick="window.CLQ_setArticle('${it.id}')">この記事で出題</a></div>
+        <div class="row">
+          <a class="btn secondary" href="#/study" onclick="window.CLQ_setArticle('${it.id}')">この記事で出題</a>
+          <a class="btn secondary" href="#/article?slug=${encodeURIComponent(it.slug)}">読む</a>
+        </div>
       </div>`,
       )
       .join('');
@@ -717,6 +730,92 @@ async function setupArticles() {
     refresh();
   });
   refresh();
+}
+
+function escapeRegExp(s) {
+  return (s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function viewArticle() {
+  const div = document.createElement('div');
+  const wrap = document.createElement('section');
+  wrap.className = 'window';
+  wrap.innerHTML = '<div class="muted">読み込み中...</div>';
+  div.appendChild(wrap);
+
+  setTimeout(async () => {
+    try {
+      const uid = fb.user?.uid;
+      const slug = getQuery().get('slug');
+      if (!uid || !slug) {
+        wrap.innerHTML =
+          '<div class="card">記事が見つかりません。<a href="#/articles">記事一覧へ</a></div>';
+        return;
+      }
+      const { collection, query, where, limit, getDocs } = fb.fs;
+      const snap = await getDocs(
+        query(
+          collection(fb.db, 'articles'),
+          where('uid', '==', uid),
+          where('slug', '==', slug),
+          limit(1),
+        ),
+      );
+      if (snap.empty) {
+        wrap.innerHTML =
+          '<div class="card">記事が見つかりません。<a href="#/articles">記事一覧へ</a></div>';
+        return;
+      }
+      const doc0 = snap.docs[0];
+      const article = { id: doc0.id, ...doc0.data() };
+      const mdSrc = (article.body || '').replace(/\[\[([^\]]+)\]\]/g, (m, p1) => {
+        return `[${p1}](#/article?slug=${encodeURIComponent(slugify(p1))})`;
+      });
+      let html = '';
+      try {
+        const mod = await import('https://cdn.jsdelivr.net/npm/marked@12.0.2/lib/marked.esm.js');
+        const marked = mod.marked || mod.default || mod;
+        html = marked.parse(mdSrc);
+      } catch (e) {
+        console.warn('marked import failed, fallback to plain');
+        html = mdSrc.replace(/\n/g, '<br/>');
+      }
+      const allSnap = await getDocs(query(collection(fb.db, 'articles'), where('uid', '==', uid)));
+      const re = new RegExp(`\\[\\[${escapeRegExp(article.title)}\\]\\]`);
+      const backs = allSnap.docs
+        .filter((d) => d.id !== article.id && re.test(d.data().body || ''))
+        .map((d) => ({ id: d.id, title: d.data().title, slug: d.data().slug }));
+
+      wrap.innerHTML = `
+        <h2 class="title">${article.title}</h2>
+        <div class="card" style="background:transparent;border:none;padding:0;">
+          <div>${html}</div>
+        </div>
+        <div class="row" style="margin-top:.75rem;">
+          <a class="btn secondary" href="#/articles">記事一覧</a>
+          <a class="btn" href="#/study" onclick="window.CLQ_setArticle('${article.id}')">この記事で出題</a>
+        </div>
+        <div class="card" style="margin-top:1rem;">
+          <div class="muted">バックリンク</div>
+          ${
+            backs.length
+              ? backs
+                  .map(
+                    (b) =>
+                      `<div><a href=\"#/article?slug=${encodeURIComponent(b.slug)}\">${b.title}</a></div>`,
+                  )
+                  .join('')
+              : '<div class="muted">（なし）</div>'
+          }
+        </div>
+      `;
+    } catch (e) {
+      console.error(e);
+      wrap.innerHTML = `<div class=\"card\">読み込みに失敗しました: ${e?.message || e}</div>`;
+    }
+  }, 0);
+
+  return div;
 }
 
 function viewCreate() {
