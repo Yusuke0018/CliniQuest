@@ -241,6 +241,18 @@ select:focus {
   color: var(--muted);
 }
 
+/* 記事タイトルのリンク色（ライト/ダークで黄色系） */
+.article-title {
+  color: #d4a017;
+  text-decoration: none;
+}
+.article-title:hover {
+  text-decoration: underline;
+}
+[data-theme='dark'] .article-title {
+  color: #ffd55e;
+}
+
 /* Bottom Tabbar (mobile only) */
 .tabbar {
   display: none;

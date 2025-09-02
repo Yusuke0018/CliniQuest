@@ -899,7 +899,7 @@ async function setupArticles() {
       .map(
         (it) => `
       <div class="card">
-        <div><b><a href="#/article?slug=${encodeURIComponent(it.slug)}">${it.title}</a></b> <small class="muted">(${it.id.slice(0, 6)})</small></div>
+        <div><b><a class="article-title" href="#/article?slug=${encodeURIComponent(it.slug)}">${it.title}</a></b> <small class="muted">(${it.id.slice(0, 6)})</small></div>
         <div class="muted" style="margin:.25rem 0;">${(it.body || '').slice(0, 100)}</div>
         <div class="row">
           <a class="btn secondary" href="#/study" onclick="window.CLQ_setArticle('${it.id}')">この記事で出題</a>
