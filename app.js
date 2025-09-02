@@ -584,56 +584,56 @@ async function createQaAndAward(q, a, r, tagsCsv, articleIdArg = null) {
     const qaSnap = await tx.get(qaRef);
     if (!qaSnap.exists()) throw new Error('QA not found');
     const qa = qaSnap.data();
-    if (!qa.createdXpAwarded) {
-      const userSnap = await tx.get(userRef);
-      const u = userSnap.data();
-      const prevXp = u.totalXp || 0;
-      const prevLevel = u.level || 1;
-      const addXp = 5;
-      const newXp = prevXp + addXp;
-      const newLevel = computeLevel(newXp);
-      const inc =
-        newLevel > prevLevel ? computeLevelUpIncrements(u.seed, prevLevel, newLevel) : null;
-      const today = getJstYmd();
-      const newStreak = nextStreak(u.streak || { current: 0, best: 0, lastActiveYmd: null }, today);
-      const patch = {
-        totalXp: newXp,
-        level: newLevel,
-        totalCreated: (u.totalCreated || 0) + 1,
-        streak: newStreak,
-        updatedAt: serverTimestamp(),
+    if (qa.createdXpAwarded) return;
+    const userSnap = await tx.get(userRef);
+    if (!userSnap.exists()) throw new Error('user not found');
+    const u = userSnap.data();
+    const addXp = 5;
+    const prevXp = u.totalXp || 0;
+    const prevLevel = u.level || 1;
+    const newXp = prevXp + addXp;
+    const newLevel = computeLevel(newXp);
+    const inc = newLevel > prevLevel ? computeLevelUpIncrements(u.seed, prevLevel, newLevel) : null;
+    const todayYmd = getJstYmd();
+    const newStreak = nextStreak(u.streak || { current: 0, best: 0, lastActiveYmd: null }, todayYmd);
+    // ここで日次ログも先に読む
+    const ldRef = logsDailyDocRef(uid, todayYmd);
+    const ldSnap = await tx.get(ldRef);
+    const patch = {
+      totalXp: newXp,
+      level: newLevel,
+      totalCreated: (u.totalCreated || 0) + 1,
+      streak: newStreak,
+      updatedAt: serverTimestamp(),
+    };
+    if (inc) {
+      patch.stats = {
+        knowledge: (u.stats?.knowledge || 0) + inc.knowledge,
+        judgment: (u.stats?.judgment || 0) + inc.judgment,
+        skill: (u.stats?.skill || 0) + inc.skill,
+        empathy: (u.stats?.empathy || 0) + inc.empathy,
       };
-      if (inc) {
-        patch.stats = {
-          knowledge: (u.stats?.knowledge || 0) + inc.knowledge,
-          judgment: (u.stats?.judgment || 0) + inc.judgment,
-          skill: (u.stats?.skill || 0) + inc.skill,
-          empathy: (u.stats?.empathy || 0) + inc.empathy,
-        };
-      }
-      tx.update(userRef, patch);
-      tx.update(qaRef, { createdXpAwarded: true, updatedAt: serverTimestamp() });
-      // logs_daily 集計
-      const ldRef = logsDailyDocRef(uid, today);
-      const ldSnap = await tx.get(ldRef);
-      if (ldSnap.exists()) {
-        const d = ldSnap.data();
-        tx.update(ldRef, {
-          created: (d.created || 0) + 1,
-          xp: (d.xp || 0) + addXp,
-          updatedAt: serverTimestamp(),
-        });
-      } else {
-        tx.set(ldRef, {
-          uid,
-          ymd: today,
-          created: 1,
-          correct: 0,
-          xp: addXp,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      }
+    }
+    // 以降は書き込みのみ
+    tx.update(userRef, patch);
+    tx.update(qaRef, { createdXpAwarded: true, updatedAt: serverTimestamp() });
+    if (ldSnap.exists()) {
+      const d = ldSnap.data();
+      tx.update(ldRef, {
+        created: (d.created || 0) + 1,
+        xp: (d.xp || 0) + addXp,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      tx.set(ldRef, {
+        uid,
+        ymd: todayYmd,
+        created: 1,
+        correct: 0,
+        xp: addXp,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
     }
   });
 }
@@ -709,12 +709,14 @@ async function awardXp(addXp) {
     const snap = await tx.get(userRef);
     if (!snap.exists()) return;
     const u = snap.data();
+    const today = getJstYmd();
+    const ldRef = logsDailyDocRef(uid, today);
+    const ldSnap = await tx.get(ldRef);
     const prevXp = u.totalXp || 0;
     const prevLevel = u.level || 1;
     const newXp = prevXp + addXp;
     const newLevel = computeLevel(newXp);
     const inc = newLevel > prevLevel ? computeLevelUpIncrements(u.seed, prevLevel, newLevel) : null;
-    const today = getJstYmd();
     const newStreak = nextStreak(u.streak || { current: 0, best: 0, lastActiveYmd: null }, today);
     const patch = {
       totalXp: newXp,
@@ -731,8 +733,6 @@ async function awardXp(addXp) {
       };
     }
     tx.update(userRef, patch);
-    const ldRef = logsDailyDocRef(uid, today);
-    const ldSnap = await tx.get(ldRef);
     if (ldSnap.exists()) {
       const d = ldSnap.data();
       tx.update(ldRef, { xp: (d.xp || 0) + addXp, updatedAt: serverTimestamp() });
