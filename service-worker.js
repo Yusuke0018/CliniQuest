@@ -1,6 +1,13 @@
 // Simple offline cache for essential assets
-const CACHE_NAME = 'cliniquest-v1';
-const ASSETS = ['./', './index.html', './styles.css', './app.js', './manifest.webmanifest'];
+const CACHE_NAME = 'cliniquest-v3';
+const ASSETS = [
+  './',
+  './index.html?v=20250902-1',
+  './styles.css?v=20250902-1',
+  './app.js?v=20250902-1',
+  './manifest.webmanifest?v=20250902-1',
+  './404.html',
+];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
