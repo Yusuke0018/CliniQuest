@@ -842,7 +842,6 @@ function viewArticles() {
 
 async function setupArticles() {
   const { collection, query, where, getDocs, addDoc, serverTimestamp } = fb.fs;
-  const uid = fb.user?.uid;
   const listEl = qs('#artList');
   const form = qs('#artForm');
   // 検索欄を追加（存在しなければ）
@@ -857,8 +856,9 @@ async function setupArticles() {
   }
   const search = qs('#artSearch');
   async function refresh() {
-    if (!uid) return;
-    const snap = await getDocs(query(collection(fb.db, 'articles'), where('uid', '==', uid)));
+    const uidNow = fb.user?.uid;
+    if (!uidNow) return;
+    const snap = await getDocs(query(collection(fb.db, 'articles'), where('uid', '==', uidNow)));
     const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     const term = (search?.value || '').trim().toLowerCase();
     const filtered = term
@@ -894,10 +894,15 @@ async function setupArticles() {
       alert('タイトルは必須です');
       return;
     }
+    const uidNow = fb.user?.uid;
+    if (!uidNow) {
+      alert('サインイン状態を確認してください（匿名サインインが有効か、認可ドメインが正しいか）');
+      return;
+    }
     try {
       const slug = slugify(title);
       await addDoc(collection(fb.db, 'articles'), {
-        uid,
+        uid: uidNow,
         title,
         slug,
         body,
