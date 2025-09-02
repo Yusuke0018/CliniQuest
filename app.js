@@ -885,6 +885,7 @@ async function setupArticles() {
         <div class="muted" style="margin:.25rem 0;">${(it.body || '').slice(0, 100)}</div>
         <div class="row">
           <a class="btn secondary" href="#/study" onclick="window.CLQ_setArticle('${it.id}')">この記事で出題</a>
+          <a class="btn" href="#/create" onclick="window.CLQ_createFromArticle('${it.id}', '${it.title?.replace(/"/g, '&quot;') || ''}')">この記事に作問</a>
           <a class="btn secondary" href="#/article?slug=${encodeURIComponent(it.slug)}">読む</a>
           <button class="btn ng" onclick="window.CLQ_deleteArticle('${it.id}')">削除</button>
         </div>
@@ -895,6 +896,10 @@ async function setupArticles() {
   window.CLQ_setArticle = (id) => {
     state.session.filters.articleId = id;
     location.hash = '#/study';
+  };
+  window.CLQ_createFromArticle = (id, title) => {
+    state.session.filters.articleId = id;
+    location.hash = '#/create';
   };
   window.CLQ_deleteArticle = async (id) => {
     if (!confirm('この記事を削除します。よろしいですか？')) return;
@@ -1057,6 +1062,7 @@ function viewArticle() {
         <div class="row" style="margin-top:.75rem;">
           <a class="btn secondary" href="#/articles">記事一覧</a>
           <a class="btn" href="#/study" onclick="window.CLQ_setArticle('${article.id}')">この記事で出題</a>
+          <a class="btn" href="#/create" onclick="(window.CLQ_createFromArticle||function(id){state.session.filters.articleId=id;location.hash='#/create';})('${article.id}')">この記事に作問</a>
         </div>
         <div class="card" style="margin-top:1rem;">
           <div class="muted">バックリンク</div>
@@ -1123,7 +1129,6 @@ function viewCreate() {
   const div = document.createElement('div');
   const content = `
     <form id="createForm" class="grid">
-      <div class="field"><label>記事タイトル（既存/新規）</label><input id="articleTitle" placeholder="例: 肺炎の初期対応"/></div>
       <div class="row" style="gap:.5rem;align-items:center;flex-wrap:wrap;">
         <div class="muted">紐づけ先: <b id="articleSelectedName">未選択</b></div>
         <button id="openArticlePicker" type="button" class="btn secondary">記事から選ぶ</button>
@@ -1175,8 +1180,6 @@ function viewCreate() {
           const t = snap.exists() ? (snap.data().title || id0) : id0;
           selectedNameEl.textContent = t;
           form.dataset.articleId = id0;
-          const at = qs('#articleTitle');
-          if (at && (!at.value || at.value.trim().length === 0)) at.value = t;
         } catch {}
       })();
     }
@@ -1184,7 +1187,7 @@ function viewCreate() {
     function setArticleSelection(id, title) {
       form.dataset.articleId = id || '';
       selectedNameEl.textContent = title || '未選択';
-      if (title) qs('#articleTitle').value = title;
+      // タイトル入力は廃止（記事ピッカーで選択）
       state.session.filters.articleId = id || null;
     }
 
@@ -1237,11 +1240,10 @@ function viewCreate() {
     pickSearch?.addEventListener('input', () => refreshArticlePicker());
     form?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const artTitle = qs('#articleTitle').value.trim();
-      let articleId = form?.dataset?.articleId || null;
-      if (!articleId && artTitle) {
-        try { articleId = await createOrGetArticleByTitle(artTitle); } catch (e2) {}
-        if (articleId) state.session.filters.articleId = articleId;
+      let articleId = form?.dataset?.articleId || state.session.filters.articleId || null;
+      if (!articleId) {
+        alert('記事を選択してください（「記事から選ぶ」から紐づけ）');
+        return;
       }
       const qv = qs('#q').value.trim();
       const av = qs('#a').value.trim();
