@@ -389,6 +389,7 @@ async function initFirebase() {
     getDoc,
     setDoc,
     updateDoc,
+    deleteDoc,
     onSnapshot,
     collection,
     addDoc,
@@ -407,6 +408,7 @@ async function initFirebase() {
     getDoc,
     setDoc,
     updateDoc,
+    deleteDoc,
     onSnapshot,
     collection,
     addDoc,
@@ -857,6 +859,7 @@ async function setupArticles() {
         <div class="row">
           <a class="btn secondary" href="#/study" onclick="window.CLQ_setArticle('${it.id}')">この記事で出題</a>
           <a class="btn secondary" href="#/article?slug=${encodeURIComponent(it.slug)}">読む</a>
+          <button class="btn ng" onclick="window.CLQ_deleteArticle('${it.id}')">削除</button>
         </div>
       </div>`,
       )
@@ -865,6 +868,16 @@ async function setupArticles() {
   window.CLQ_setArticle = (id) => {
     state.session.filters.articleId = id;
     location.hash = '#/study';
+  };
+  window.CLQ_deleteArticle = async (id) => {
+    if (!confirm('この記事を削除します。よろしいですか？')) return;
+    try {
+      await deleteArticleById(id, false);
+      showToast && showToast('記事を削除しました');
+      refresh();
+    } catch (e) {
+      alert('削除に失敗しました: ' + (e?.message || e));
+    }
   };
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -905,6 +918,19 @@ async function setupArticles() {
 
 function escapeRegExp(s) {
   return (s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function deleteArticleById(articleId, cascade = false) {
+  const { doc, deleteDoc, collection, query, where, getDocs } = fb.fs;
+  const uid = fb.user?.uid;
+  if (!uid) throw new Error('未サインイン');
+  if (cascade) {
+    const snap = await getDocs(
+      query(collection(fb.db, 'qas'), where('uid', '==', uid), where('articleId', '==', articleId)),
+    );
+    await Promise.all(snap.docs.map((d) => deleteDoc(doc(fb.db, 'qas', d.id))));
+  }
+  await deleteDoc(doc(fb.db, 'articles', articleId));
 }
 
 function viewArticle() {
@@ -969,6 +995,13 @@ function viewArticle() {
           </div>
           <div class="row"><button id="saveArticle" class="btn">保存</button></div>
         </details>
+        <div class="card" style="margin-top:.5rem;">
+          <div class="muted">危険な操作</div>
+          <label style="display:inline-flex;align-items:center;gap:.35rem;margin:.5rem 0;">
+            <input type="checkbox" id="delCascade" /> 関連する問題（Q/A）も一緒に削除する
+          </label>
+          <div class="row"><button id="delArticle" class="btn ng">この記事を削除</button></div>
+        </div>
         <div class="row" style="margin-top:.75rem;">
           <a class="btn secondary" href="#/articles">記事一覧</a>
           <a class="btn" href="#/study" onclick="window.CLQ_setArticle('${article.id}')">この記事で出題</a>
@@ -1001,6 +1034,26 @@ function viewArticle() {
           location.hash = `#/article?slug=${encodeURIComponent(article.slug)}`;
         } catch (err) {
           alert('保存に失敗しました: ' + (err?.message || err));
+        }
+      });
+      const delBtn = qs('#delArticle', wrap);
+      delBtn?.addEventListener('click', async () => {
+        const cascade = !!qs('#delCascade', wrap)?.checked;
+        if (
+          !confirm(
+            cascade
+              ? 'この記事と関連する問題（Q/A）を削除します。よろしいですか？'
+              : 'この記事を削除します。よろしいですか？',
+          )
+        )
+          return;
+        try {
+          await deleteArticleById(article.id, cascade);
+          showToast && showToast('記事を削除しました');
+          location.hash = '#/articles';
+        } catch (err) {
+          console.error('記事削除エラー', err);
+          alert('記事の削除に失敗しました: ' + (err?.message || err));
         }
       });
     } catch (e) {
