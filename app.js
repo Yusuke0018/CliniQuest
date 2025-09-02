@@ -399,6 +399,7 @@ async function initFirebase() {
     limit,
     orderBy,
     serverTimestamp,
+    increment,
     runTransaction,
   } = firestore;
 
@@ -418,6 +419,7 @@ async function initFirebase() {
     limit,
     orderBy,
     serverTimestamp,
+    increment,
     runTransaction,
   };
 
@@ -596,9 +598,8 @@ async function createQaAndAward(q, a, r, tagsCsv, articleIdArg = null) {
     const inc = newLevel > prevLevel ? computeLevelUpIncrements(u.seed, prevLevel, newLevel) : null;
     const todayYmd = getJstYmd();
     const newStreak = nextStreak(u.streak || { current: 0, best: 0, lastActiveYmd: null }, todayYmd);
-    // ここで日次ログも先に読む
+    // 日次ログは読み取らずにインクリメントで更新
     const ldRef = logsDailyDocRef(uid, todayYmd);
-    const ldSnap = await tx.get(ldRef);
     const patch = {
       totalXp: newXp,
       level: newLevel,
@@ -617,24 +618,17 @@ async function createQaAndAward(q, a, r, tagsCsv, articleIdArg = null) {
     // 以降は書き込みのみ
     tx.update(userRef, patch);
     tx.update(qaRef, { createdXpAwarded: true, updatedAt: serverTimestamp() });
-    if (ldSnap.exists()) {
-      const d = ldSnap.data();
-      tx.update(ldRef, {
-        created: (d.created || 0) + 1,
-        xp: (d.xp || 0) + addXp,
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      tx.set(ldRef, {
+    tx.set(
+      ldRef,
+      {
         uid,
         ymd: todayYmd,
-        created: 1,
-        correct: 0,
-        xp: addXp,
-        createdAt: serverTimestamp(),
+        created: fb.fs.increment(1),
+        xp: fb.fs.increment(addXp),
         updatedAt: serverTimestamp(),
-      });
-    }
+      },
+      { merge: true },
+    );
   });
 }
 
@@ -673,27 +667,19 @@ async function awardCorrectXpAndUpdate(totalCorrectDelta = 1) {
       };
     }
     tx.update(userRef, patch);
-    // logs_daily 集計
+    // logs_daily 集計（読み取りなしでインクリメント）
     const ldRef = logsDailyDocRef(uid, today);
-    const ldSnap = await tx.get(ldRef);
-    if (ldSnap.exists()) {
-      const d = ldSnap.data();
-      tx.update(ldRef, {
-        correct: (d.correct || 0) + 1,
-        xp: (d.xp || 0) + gain,
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      tx.set(ldRef, {
+    tx.set(
+      ldRef,
+      {
         uid,
         ymd: today,
-        created: 0,
-        correct: 1,
-        xp: gain,
-        createdAt: serverTimestamp(),
+        correct: fb.fs.increment(1),
+        xp: fb.fs.increment(gain),
         updatedAt: serverTimestamp(),
-      });
-    }
+      },
+      { merge: true },
+    );
     const leveledUp = newLevel > prevLevel;
     return { isCritical, gain, leveledUp, levelAfter: newLevel };
   });
@@ -711,7 +697,6 @@ async function awardXp(addXp) {
     const u = snap.data();
     const today = getJstYmd();
     const ldRef = logsDailyDocRef(uid, today);
-    const ldSnap = await tx.get(ldRef);
     const prevXp = u.totalXp || 0;
     const prevLevel = u.level || 1;
     const newXp = prevXp + addXp;
@@ -733,20 +718,11 @@ async function awardXp(addXp) {
       };
     }
     tx.update(userRef, patch);
-    if (ldSnap.exists()) {
-      const d = ldSnap.data();
-      tx.update(ldRef, { xp: (d.xp || 0) + addXp, updatedAt: serverTimestamp() });
-    } else {
-      tx.set(ldRef, {
-        uid,
-        ymd: today,
-        created: 0,
-        correct: 0,
-        xp: addXp,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    }
+    tx.set(
+      ldRef,
+      { uid, ymd: today, xp: fb.fs.increment(addXp), updatedAt: serverTimestamp() },
+      { merge: true },
+    );
   });
 }
 
