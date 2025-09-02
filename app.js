@@ -741,11 +741,6 @@ function render() {
     if (a.getAttribute('href') === `#${path}`) a.classList.add('active');
     else a.classList.remove('active');
   });
-  // 下部タブの活性
-  qsa('#tabbar [data-route]').forEach((a) => {
-    if (a.getAttribute('href') === `#${path}`) a.classList.add('active');
-    else a.classList.remove('active');
-  });
   // タイトル更新
   const titleMap = {
     '/home': 'ホーム',
@@ -756,21 +751,6 @@ function render() {
     '/profile': 'プロフィール',
   };
   document.title = `CliniQuest - ${titleMap[path] || 'ホーム'}`;
-  // 学習バッジ更新（非同期）
-  setTimeout(async () => {
-    try {
-      const n = await countDueToday();
-      const bd = qs('#tabStudyBadge');
-      if (bd) {
-        if (n > 0) {
-          bd.textContent = String(n);
-          bd.hidden = false;
-        } else {
-          bd.hidden = true;
-        }
-      }
-    } catch {}
-  }, 0);
 }
 
 // -------- Views (MVPプレースホルダ) --------
