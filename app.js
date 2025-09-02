@@ -699,6 +699,57 @@ async function awardCorrectXpAndUpdate(totalCorrectDelta = 1) {
   });
 }
 
+// 任意XPを付与（正解/作問カウントは触らない）
+async function awardXp(addXp) {
+  const { doc, runTransaction, serverTimestamp } = fb.fs;
+  const uid = fb.user?.uid;
+  if (!uid || !addXp) return;
+  const userRef = doc(fb.db, 'users', uid);
+  await runTransaction(fb.db, async (tx) => {
+    const snap = await tx.get(userRef);
+    if (!snap.exists()) return;
+    const u = snap.data();
+    const prevXp = u.totalXp || 0;
+    const prevLevel = u.level || 1;
+    const newXp = prevXp + addXp;
+    const newLevel = computeLevel(newXp);
+    const inc = newLevel > prevLevel ? computeLevelUpIncrements(u.seed, prevLevel, newLevel) : null;
+    const today = getJstYmd();
+    const newStreak = nextStreak(u.streak || { current: 0, best: 0, lastActiveYmd: null }, today);
+    const patch = {
+      totalXp: newXp,
+      level: newLevel,
+      streak: newStreak,
+      updatedAt: serverTimestamp(),
+    };
+    if (inc) {
+      patch.stats = {
+        knowledge: (u.stats?.knowledge || 0) + inc.knowledge,
+        judgment: (u.stats?.judgment || 0) + inc.judgment,
+        skill: (u.stats?.skill || 0) + inc.skill,
+        empathy: (u.stats?.empathy || 0) + inc.empathy,
+      };
+    }
+    tx.update(userRef, patch);
+    const ldRef = logsDailyDocRef(uid, today);
+    const ldSnap = await tx.get(ldRef);
+    if (ldSnap.exists()) {
+      const d = ldSnap.data();
+      tx.update(ldRef, { xp: (d.xp || 0) + addXp, updatedAt: serverTimestamp() });
+    } else {
+      tx.set(ldRef, {
+        uid,
+        ymd: today,
+        created: 0,
+        correct: 0,
+        xp: addXp,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  });
+}
+
 // -------- Routing --------
 const routes = {
   '/home': viewHome,
@@ -912,56 +963,9 @@ async function setupArticles() {
           if (!aSnap.exists()) return;
           const a = aSnap.data();
           if (a.createdXpAwarded) return;
-          const userRef = fb.fs.doc(fb.db, 'users', uidNow);
-          const uSnap = await tx.get(userRef);
-          if (!uSnap.exists()) return;
-          const u = uSnap.data();
-          const prevXp = u.totalXp || 0;
-          const prevLevel = u.level || 1;
-          const addXp = 5;
-          const newXp = prevXp + addXp;
-          const newLevel = computeLevel(newXp);
-          const inc =
-            newLevel > prevLevel ? computeLevelUpIncrements(u.seed, prevLevel, newLevel) : null;
-          const today = getJstYmd();
-          const newStreak = nextStreak(
-            u.streak || { current: 0, best: 0, lastActiveYmd: null },
-            today,
-          );
-          const patch = {
-            totalXp: newXp,
-            level: newLevel,
-            streak: newStreak,
-            updatedAt: serverTimestamp(),
-          };
-          if (inc) {
-            patch.stats = {
-              knowledge: (u.stats?.knowledge || 0) + inc.knowledge,
-              judgment: (u.stats?.judgment || 0) + inc.judgment,
-              skill: (u.stats?.skill || 0) + inc.skill,
-              empathy: (u.stats?.empathy || 0) + inc.empathy,
-            };
-          }
-          tx.update(userRef, patch);
-          // 日次ログのXPだけ加算（作問カウントはQ/Aに限定）
-          const ldRef = logsDailyDocRef(uidNow, today);
-          const ldSnap = await tx.get(ldRef);
-          if (ldSnap.exists()) {
-            const d = ldSnap.data();
-            tx.update(ldRef, { xp: (d.xp || 0) + addXp, updatedAt: serverTimestamp() });
-          } else {
-            tx.set(ldRef, {
-              uid: uidNow,
-              ymd: today,
-              created: 0,
-              correct: 0,
-              xp: addXp,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-            });
-          }
           tx.update(artRef, { createdXpAwarded: true, updatedAt: serverTimestamp() });
         });
+        await awardXp(5);
       } catch (e2) {
         console.warn('記事作成時のXP付与に失敗（継続）', e2);
       }
@@ -1091,66 +1095,8 @@ function viewArticle() {
             body,
             updatedAt: serverTimestamp(),
           });
-          // 記事保存時に +5XP 付与
-          const uidNow = fb.user?.uid;
-          if (uidNow) {
-            try {
-              await runTransaction(fb.db, async (tx) => {
-                const userRef = doc(fb.db, 'users', uidNow);
-                const uSnap = await tx.get(userRef);
-                if (!uSnap.exists()) return;
-                const u = uSnap.data();
-                const addXp = 5;
-                const prevXp = u.totalXp || 0;
-                const prevLevel = u.level || 1;
-                const newXp = prevXp + addXp;
-                const newLevel = computeLevel(newXp);
-                const inc =
-                  newLevel > prevLevel
-                    ? computeLevelUpIncrements(u.seed, prevLevel, newLevel)
-                    : null;
-                const today = getJstYmd();
-                const newStreak = nextStreak(
-                  u.streak || { current: 0, best: 0, lastActiveYmd: null },
-                  today,
-                );
-                const patch = {
-                  totalXp: newXp,
-                  level: newLevel,
-                  streak: newStreak,
-                  updatedAt: serverTimestamp(),
-                };
-                if (inc) {
-                  patch.stats = {
-                    knowledge: (u.stats?.knowledge || 0) + inc.knowledge,
-                    judgment: (u.stats?.judgment || 0) + inc.judgment,
-                    skill: (u.stats?.skill || 0) + inc.skill,
-                    empathy: (u.stats?.empathy || 0) + inc.empathy,
-                  };
-                }
-                tx.update(userRef, patch);
-                // 日次ログのXPだけ加算（作問カウントはQ/Aに限定）
-                const ldRef = logsDailyDocRef(uidNow, today);
-                const ldSnap = await tx.get(ldRef);
-                if (ldSnap.exists()) {
-                  const d = ldSnap.data();
-                  tx.update(ldRef, { xp: (d.xp || 0) + addXp, updatedAt: serverTimestamp() });
-                } else {
-                  tx.set(ldRef, {
-                    uid: uidNow,
-                    ymd: today,
-                    created: 0,
-                    correct: 0,
-                    xp: addXp,
-                    createdAt: serverTimestamp(),
-                    updatedAt: serverTimestamp(),
-                  });
-                }
-              });
-            } catch (e2) {
-              console.warn('記事保存時のXP付与に失敗（継続）', e2);
-            }
-          }
+          // 記事保存時に +5XP（共通ロジック）
+          try { await awardXp(5); } catch (e2) { console.warn('記事保存時のXP付与に失敗（継続）', e2); }
           // 再描画
           showToast && showToast('記事を保存しました: +5XP');
           location.hash = `#/article?slug=${encodeURIComponent(article.slug)}`;
