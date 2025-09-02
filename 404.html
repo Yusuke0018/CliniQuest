@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CliniQuest</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <script>
+      // GitHub Pages の SPA フォールバック: 404でも index に戻す
+      location.replace('./index.html' + (location.hash || '#/home'));
+    </script>
+  </body>
+</html>

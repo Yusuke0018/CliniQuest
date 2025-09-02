@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CliniQuest</title>
+    <meta name="description" content="医学知識Q&A学習アプリ" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="theme-color" content="#0c2c57" />
+    <link rel="icon" href="./icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="./icons/icon-180.png" />
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- 任意: Firebase設定を外部ファイルで与える場合は config.js を作成し、以下を有効化してください -->
+    <!-- <script src="./config.js"></script> -->
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>CliniQuest</h1>
+      <nav class="nav">
+        <a href="#/home" data-route>ホーム</a>
+        <a href="#/create" data-route>作問</a>
+        <a href="#/study" data-route>学習</a>
+        <a href="#/profile" data-route>プロフィール</a>
+      </nav>
+    </header>
+
+    <main id="app" class="container"></main>
+
+    <footer class="footer">
+      <small>© CliniQuest</small>
+      <button id="installBtn" class="btn secondary" hidden>アプリをインストール</button>
+      <span id="onlineStatus" class="status"></span>
+    </footer>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
