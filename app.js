@@ -290,7 +290,69 @@ const titlesByLevel = new Map([
   [98, '知識の賢王'],
   [100, '伝説の医師'],
 ]);
-
+// ---- Achievements thresholds ----
+const CREATE_THRESHOLDS = [
+  1, 3, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200, 250, 300, 400,
+  500, 750,
+];
+const CREATE_TITLES = [
+  '作問のはじめて記念',
+  '作問見習い',
+  '作問徒弟',
+  '作問新星',
+  '作問手練れ',
+  '作問職人',
+  '作問の匠',
+  '臨床問題の蒐集家',
+  '設問アーキテクト',
+  '工房の親方',
+  'ケースメイカー',
+  '学習設計士',
+  'クイズの調律師',
+  '章立ての構成家',
+  '作問百戦錬磨',
+  '設問編集長',
+  'カテゴリー編成士',
+  '作問オーソリティ',
+  '体系化の達人',
+  '臨床問題監修者',
+  'DB守人',
+  'ギルドマスター',
+  '宗匠',
+  '伝道師',
+  'レジェンド',
+];
+const CORRECT_THRESHOLDS = [
+  10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1500, 2000,
+  2500, 3000, 4000, 5000, 6000, 7000,
+];
+const CORRECT_TITLES = [
+  '初勝利の証',
+  '連戦の新兵',
+  '解答ランナー',
+  '正答チャージャー',
+  '百問征服者',
+  '安定解答士',
+  '解答ストライカー',
+  '正答コンダクター',
+  '解答ナビゲーター',
+  '正答スナイパー',
+  '解答エキスパート',
+  '正答チャンピオン',
+  '解答マイスター',
+  '正答ヴァンガード',
+  '解答エグゼクター',
+  '千問無双',
+  '正答アーキビスト',
+  '解答グランドマスター',
+  '正答パラゴン',
+  '解答オラクル',
+  '正答ドラゴン',
+  '解答セイジ',
+  '正答イモータル',
+  '解答エンペラー',
+  '正答レジェンド',
+];
 function levelTitle(level) {
   let title = '-';
   for (const [lv, name] of titlesByLevel) {
@@ -634,6 +696,10 @@ async function createQaAndAward(q, a, r, tagsCsv, articleIdArg = null) {
       }
     }
   });
+  // 実績（作問）チェック
+  try {
+    await checkAndAwardCreateAchievements();
+  } catch {}
 }
 
 async function awardCorrectXpAndUpdate(totalCorrectDelta = 1) {
@@ -695,6 +761,101 @@ async function awardCorrectXpAndUpdate(totalCorrectDelta = 1) {
     const leveledUp = newLevel > prevLevel;
     return { isCritical, gain, leveledUp, levelAfter: newLevel };
   });
+}
+
+async function hasAchievement(uid, type, key) {
+  const { collection, query, where, getDocs, limit } = fb.fs;
+  const snap = await getDocs(
+    query(
+      collection(fb.db, 'achievements'),
+      where('uid', '==', uid),
+      where('type', '==', type),
+      where('key', '==', key),
+      limit(1),
+    ),
+  );
+  return !snap.empty;
+}
+
+async function checkAndAwardCreateAchievements() {
+  const { collection, query, where, getDocs, addDoc, serverTimestamp, doc, getDoc } = fb.fs;
+  const uid = fb.user?.uid;
+  if (!uid) return;
+  const uSnap = await getDoc(doc(fb.db, 'users', uid));
+  if (!uSnap.exists()) return;
+  const totalCreated = uSnap.data().totalCreated || 0;
+  for (let i = 0; i < CREATE_THRESHOLDS.length; i++) {
+    const th = CREATE_THRESHOLDS[i];
+    if (totalCreated >= th) {
+      const key = `create-${th}`;
+      if (!(await hasAchievement(uid, 'create', key))) {
+        await addDoc(collection(fb.db, 'achievements'), {
+          uid,
+          type: 'create',
+          key,
+          title: CREATE_TITLES[i],
+          awardedAt: serverTimestamp(),
+        });
+      }
+    }
+  }
+}
+
+async function checkAndAwardCorrectAchievements(extra = {}) {
+  const { collection, addDoc, serverTimestamp, getDoc, doc } = fb.fs;
+  const uid = fb.user?.uid;
+  if (!uid) return;
+  const uSnap = await getDoc(doc(fb.db, 'users', uid));
+  if (!uSnap.exists()) return;
+  const u = uSnap.data();
+  const totalCorrect = u.totalCorrect || 0;
+  for (let i = 0; i < CORRECT_THRESHOLDS.length; i++) {
+    const th = CORRECT_THRESHOLDS[i];
+    if (totalCorrect >= th) {
+      const key = `correct-${th}`;
+      if (!(await hasAchievement(uid, 'correct', key))) {
+        await addDoc(collection(fb.db, 'achievements'), {
+          uid,
+          type: 'correct',
+          key,
+          title: CORRECT_TITLES[i],
+          awardedAt: serverTimestamp(),
+        });
+      }
+    }
+  }
+  // レベル称号（2刻み）
+  const level = u.level || 1;
+  const maxEven = Math.floor(level / 2) * 2;
+  for (let lv = 2; lv <= maxEven; lv += 2) {
+    const key = `level-${lv}`;
+    if (!(await hasAchievement(uid, 'level', key))) {
+      await addDoc(collection(fb.db, 'achievements'), {
+        uid,
+        type: 'level',
+        key,
+        title: `Lv${lv}: ${levelTitle(lv)}`,
+        awardedAt: serverTimestamp(),
+      });
+    }
+  }
+  // 隠し: 深夜の番人（JST 03時台）
+  try {
+    const now = new Date(Date.now() + 9 * 3600 * 1000);
+    const h = now.getUTCHours();
+    if (h === 3) {
+      const key = 'secret-night-watch';
+      if (!(await hasAchievement(uid, 'secret', key))) {
+        await addDoc(collection(fb.db, 'achievements'), {
+          uid,
+          type: 'secret',
+          key,
+          title: '深夜の番人',
+          awardedAt: serverTimestamp(),
+        });
+      }
+    }
+  } catch {}
 }
 
 // -------- Routing --------
@@ -1214,6 +1375,9 @@ function setupStudy() {
   ok.onclick = async () => {
     try {
       const { isCritical, gain, leveledUp } = await awardCorrectXpAndUpdate(1);
+      try {
+        await checkAndAwardCorrectAchievements({ leveledUp });
+      } catch {}
       // SRS 更新（正解）
       const lastId = state.session.history[state.session.history.length - 1];
       if (lastId) await updateQaSrs(lastId, true);
@@ -1247,8 +1411,12 @@ function viewProfile() {
   const email = fb.user?.email || '';
   const content = `
     <div class="grid cols-2">
-      <div class="card">ユーザーID: <code>${uid}</code><br/>サインイン: 匿名</div>
+      <div class="card">ユーザーID: <code>${uid}</code><br/>サインイン: ${isAnon ? '匿名' : 'メール/Google'}</div>
       <div class="card">総XP: ${u?.totalXp ?? 0} ／ 正解: ${u?.totalCorrect ?? 0} ／ 作問: ${u?.totalCreated ?? 0}</div>
+    </div>
+    <div class="card" style="margin-top:.5rem;">
+      <div class="muted">最近の実績</div>
+      <div id="achList" class="grid"></div>
     </div>
     <div class="card" style="margin-top:.75rem;">
       ${
@@ -1283,7 +1451,11 @@ function viewProfile() {
     </div>
   `;
   div.appendChild(panel('プロフィール', content));
-  setTimeout(() => setupProfileAuth(), 0);
+  setTimeout(() => {
+    setupProfileAuth();
+    setupBackupUI();
+    loadRecentAchievements();
+  }, 0);
   return div;
 }
 
@@ -1398,6 +1570,93 @@ render();
 initFirebase();
 initTheme();
 attachSwipeNav();
+
+// Toast utility
+function showToast(msg, ms = 2000) {
+  const root = qs('#toastRoot');
+  if (!root) return;
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  root.appendChild(el);
+  setTimeout(() => el.remove(), ms);
+}
+
+// ---- Summary (monthly) ----
+function viewSummary() {
+  const div = document.createElement('div');
+  const content = `
+    <div id="sumWrap" class="grid"></div>
+  `;
+  div.appendChild(panel('月次サマリー', content));
+  setTimeout(() => loadSummary(), 0);
+  return div;
+}
+
+function getMonthRangeJst(date = new Date()) {
+  const d = new Date(date.getTime() + 9 * 3600 * 1000);
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth() + 1;
+  const ymd = (y, mm, dd) => `${y}${String(mm).padStart(2, '0')}${String(dd).padStart(2, '0')}`;
+  const start = ymd(y, m, 1);
+  const endDate = new Date(Date.UTC(y, m, 0)); // JST month end approx
+  const end = ymd(y, m, endDate.getUTCDate());
+  return { start, end, y, m };
+}
+
+async function loadSummary() {
+  const wrap = qs('#sumWrap');
+  if (!wrap) return;
+  const uid = fb.user?.uid;
+  if (!uid) return;
+  const { start, end, y, m } = getMonthRangeJst();
+  const { collection, query, where, getDocs, orderBy } = fb.fs;
+  const snap = await getDocs(
+    query(
+      collection(fb.db, 'logs_daily'),
+      where('uid', '==', uid),
+      where('ymd', '>=', start),
+      where('ymd', '<=', end),
+    ),
+  );
+  const rows = snap.docs.map((d) => d.data());
+  rows.sort((a, b) => String(a.ymd).localeCompare(String(b.ymd)));
+  const days = {};
+  let sumC = 0,
+    sumK = 0,
+    sumXp = 0;
+  for (const r of rows) {
+    const d = String(r.ymd).slice(6, 8);
+    days[d] = { created: r.created || 0, correct: r.correct || 0, xp: r.xp || 0 };
+    sumC += r.created || 0;
+    sumK += r.correct || 0;
+    sumXp += r.xp || 0;
+  }
+  const svg = renderMiniChart(days);
+  wrap.innerHTML = `
+    <div class="grid cols-2">
+      <div class="card">${y}年${m}月 合計<br/>作問: <b>${sumC}</b>／正解: <b>${sumK}</b>／XP: <b>${sumXp}</b></div>
+      <div class="card">XP推移<br/>${svg}</div>
+    </div>
+  `;
+}
+
+function renderMiniChart(days) {
+  const w = 320,
+    h = 64,
+    p = 4;
+  const keys = Object.keys(days).sort((a, b) => a - b);
+  const vals = keys.map((k) => days[k].xp || 0);
+  const max = Math.max(1, ...vals);
+  const step = (w - 2 * p) / Math.max(1, keys.length - 1);
+  let d = '';
+  vals.forEach((v, i) => {
+    const x = p + i * step;
+    const y = h - p - (v / max) * (h - 2 * p);
+    d += i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`;
+  });
+  return `<svg width="${w}" height="${h}"><rect x="0" y="0" width="${w}" height="${h}" fill="#fff" stroke="#e5eaf0"/><path d="${d}" fill="none" stroke="#2563eb" stroke-width="2"/></svg>`;
+}
 
 // -------- Toast utility --------
 function showToast(msg, ms = 2000) {
