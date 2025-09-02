@@ -1158,6 +1158,59 @@ function setupStudy() {
     ok.style.display = ng.style.display = 'inline-block';
     show.style.display = 'none';
   };
+  // 学習ボックス内のスワイプで○/×
+  const box = qs('#studyBox');
+  let sx = 0,
+    sy = 0,
+    st = false;
+  const stStart = (x, y) => {
+    sx = x;
+    sy = y;
+    st = true;
+  };
+  const stEnd = async (x, y) => {
+    if (!st) return;
+    st = false;
+    const dx = x - sx,
+      dy = y - sy;
+    if (Math.abs(dy) > 60) return;
+    if (aText.style.display !== 'block') return; // 答え表示後のみ
+    if (dx >= 40) {
+      ok.click();
+    } else if (dx <= -40) {
+      ng.click();
+    }
+  };
+  box.addEventListener(
+    'touchstart',
+    (e) => {
+      const t = e.touches[0];
+      stStart(t.clientX, t.clientY);
+    },
+    { passive: true },
+  );
+  box.addEventListener(
+    'touchend',
+    (e) => {
+      const t = e.changedTouches[0];
+      stEnd(t.clientX, t.clientY);
+    },
+    { passive: true },
+  );
+  box.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (e.pointerType === 'touch') stStart(e.clientX, e.clientY);
+    },
+    { passive: true },
+  );
+  box.addEventListener(
+    'pointerup',
+    (e) => {
+      if (e.pointerType === 'touch') stEnd(e.clientX, e.clientY);
+    },
+    { passive: true },
+  );
   ok.onclick = async () => {
     try {
       const { isCritical, gain, leveledUp } = await awardCorrectXpAndUpdate(1);

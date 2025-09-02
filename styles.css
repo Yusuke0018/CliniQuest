@@ -242,7 +242,7 @@ select:focus {
   padding: 0.25rem 0;
 }
 .tabbar a {
-  flex: 1 1 20%;
+  flex: 1 1 16%;
   text-align: center;
   text-decoration: none;
   color: var(--text);
