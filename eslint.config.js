@@ -11,15 +11,14 @@ export default [
         window: 'readonly',
         document: 'readonly',
         navigator: 'readonly',
-        location: 'readonly'
-      }
+        location: 'readonly',
+      },
     },
     plugins: {
-      import: pluginImport
+      import: pluginImport,
     },
     rules: {
-      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }]
-    }
-  }
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+    },
+  },
 ];
-
