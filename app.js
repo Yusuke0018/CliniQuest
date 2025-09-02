@@ -86,7 +86,7 @@ const PERMS = (() => {
 
 const state = {
   userDoc: null,
-  session: { history: [] },
+  session: { history: [], filters: { dueOnly: true, articleId: null } },
 };
 
 const titlesByLevel = new Map([
@@ -157,6 +157,51 @@ function seedFromUid(uid) {
     h = Math.imul(h, 16777619) >>> 0;
   }
   return h >>> 0;
+}
+
+// ---- Articles（Obsidian風リンク対応） ----
+function slugify(title) {
+  return (title || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u3040-\u30ff\u3400-\u9fff\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 64);
+}
+
+function parseWikiLinks(md) {
+  // [[Title]] を #/article?slug=title にリンク
+  return (md || '').replace(/\[\[([^\]]+)\]\]/g, (m, p1) => {
+    const slug = slugify(p1);
+    return `<a href="#/article?slug=${encodeURIComponent(slug)}">${p1}</a>`;
+  });
+}
+
+async function createOrGetArticleByTitle(title) {
+  const { collection, addDoc, getDocs, query, where, limit, serverTimestamp } = fb.fs;
+  const uid = fb.user?.uid;
+  if (!uid) throw new Error('未サインイン');
+  const slug = slugify(title);
+  const q = query(
+    collection(fb.db, 'articles'),
+    where('uid', '==', uid),
+    where('slug', '==', slug),
+    limit(1),
+  );
+  const snap = await getDocs(q);
+  if (!snap.empty) return snap.docs[0].id;
+  const ref = await addDoc(collection(fb.db, 'articles'), {
+    uid,
+    title,
+    slug,
+    body: '',
+    tags: [],
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return ref.id;
 }
 
 async function initFirebase() {
@@ -328,7 +373,7 @@ function logsDailyDocRef(uid, ymd) {
   return doc(fb.db, 'logs_daily', `${uid}_${ymd}`);
 }
 
-async function createQaAndAward(q, a, r, tagsCsv) {
+async function createQaAndAward(q, a, r, tagsCsv, articleIdArg = null) {
   const { collection, addDoc, serverTimestamp, doc, runTransaction } = fb.fs;
   const uid = fb.user?.uid;
   if (!uid) throw new Error('未サインイン');
@@ -337,13 +382,21 @@ async function createQaAndAward(q, a, r, tagsCsv) {
     .map((s) => s.trim())
     .filter((s) => s.length);
 
+  // 記事選択（任意）
+  const articleId = articleIdArg || state.session?.filters?.articleId || null;
+
+  // SRS 初期値: 追加直後は今日（JST）にDue
+  const today = getJstYmd();
+
   const qaRef = await addDoc(collection(fb.db, 'qas'), {
     uid,
+    articleId,
     question: q,
     answer: a,
     rationale: r || null,
     tags,
     createdXpAwarded: false,
+    srs: { reps: 0, ease: 2.5, interval: 0, nextDueYmd: today, lastReviewedAt: null },
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -471,6 +524,7 @@ async function awardCorrectXpAndUpdate(totalCorrectDelta = 1) {
 // -------- Routing --------
 const routes = {
   '/home': viewHome,
+  '/articles': viewArticles,
   '/create': viewCreate,
   '/study': viewStudy,
   '/profile': viewProfile,
@@ -520,6 +574,8 @@ function viewHome() {
   const xpToNext = LEVEL_SIZE - (totalXp % LEVEL_SIZE || 0);
   const stats = u?.stats ?? { knowledge: 0, judgment: 0, skill: 0, empathy: 0 };
   const title = levelTitle(level);
+  // 今日の復習数（後段で非同期取得して差し替え）
+  const dueSpanId = 'dueCount_' + Math.random().toString(36).slice(2, 8);
   const content = `
     ${warn}
     <div class="grid cols-2">
@@ -529,23 +585,94 @@ function viewHome() {
         <div><span class="stat">知識</span>${stats.knowledge || 0} <span class="stat">判断力</span>${stats.judgment || 0} <span class="stat">技術</span>${stats.skill || 0} <span class="stat">共感力</span>${stats.empathy || 0}</div>
       </div>
       <div class="card">
-        <div>今日の復習: <b>-</b> 問</div>
+        <div>今日の復習: <b id="${dueSpanId}">-</b> 問</div>
         <div>ストリーク: ${u?.streak?.current ?? 0} 日</div>
       </div>
     </div>
     <div class="row" style="margin-top: .75rem;">
       <a class="btn" href="#/study">学習をはじめる</a>
       <a class="btn secondary" href="#/create">新規作問</a>
+      <a class="btn secondary" href="#/articles">記事を編集</a>
     </div>
   `;
   div.appendChild(panel('ホーム', content));
+  // 非同期で今日の復習数を取得
+  setTimeout(async () => {
+    try {
+      const n = await countDueToday();
+      const el = document.getElementById(dueSpanId);
+      if (el) el.textContent = String(n);
+    } catch {}
+  }, 0);
   return div;
+}
+
+function viewArticles() {
+  const div = document.createElement('div');
+  const content = `
+    <form id="artForm" class="grid">
+      <div class="field"><label>記事タイトル</label><input id="artTitle" required placeholder="例: 肺炎の初期対応"/></div>
+      <div class="field"><label>本文（Markdown、[[リンク]]可）</label><textarea id="artBody" rows="8" placeholder="例: 肺炎の初期対応では [[抗菌薬選択]] を参照..."></textarea></div>
+      <div class="row"><button class="btn" type="submit">記事を保存</button></div>
+    </form>
+    <div id="artList" class="grid" style="margin-top:1rem;"></div>
+  `;
+  div.appendChild(panel('記事', content));
+  setTimeout(() => setupArticles(), 0);
+  return div;
+}
+
+async function setupArticles() {
+  const { collection, query, where, getDocs, addDoc, serverTimestamp } = fb.fs;
+  const uid = fb.user?.uid;
+  const listEl = qs('#artList');
+  const form = qs('#artForm');
+  async function refresh() {
+    if (!uid) return;
+    const snap = await getDocs(query(collection(fb.db, 'articles'), where('uid', '==', uid)));
+    const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    listEl.innerHTML = items
+      .map(
+        (it) => `
+      <div class="card">
+        <div><b>${it.title}</b> <small class="muted">(${it.id.slice(0, 6)})</small></div>
+        <div class="muted" style="margin:.25rem 0;">${(it.body || '').slice(0, 100)}</div>
+        <div class="row"><a class="btn secondary" href="#/study" onclick="window.CLQ_setArticle('${it.id}')">この記事で出題</a></div>
+      </div>`,
+      )
+      .join('');
+  }
+  window.CLQ_setArticle = (id) => {
+    state.session.filters.articleId = id;
+    location.hash = '#/study';
+  };
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const title = qs('#artTitle').value.trim();
+    const body = qs('#artBody').value;
+    if (!title) return;
+    const slug = slugify(title);
+    await addDoc(collection(fb.db, 'articles'), {
+      uid,
+      title,
+      slug,
+      body,
+      tags: [],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    qs('#artTitle').value = '';
+    qs('#artBody').value = '';
+    refresh();
+  });
+  refresh();
 }
 
 function viewCreate() {
   const div = document.createElement('div');
   const content = `
     <form id="createForm" class="grid">
+      <div class="field"><label>記事タイトル（既存/新規）</label><input id="articleTitle" placeholder="例: 肺炎の初期対応"/></div>
       <div class="field"><label>問題（Q）</label><textarea id="q" rows="3" required></textarea></div>
       <div class="field"><label>答え（A）</label><textarea id="a" rows="3" required></textarea></div>
       <div class="field"><label>解説（任意）</label><textarea id="r" rows="3"></textarea></div>
@@ -559,14 +686,22 @@ function viewCreate() {
   div.appendChild(panel('問題を作成', content));
   setTimeout(() => {
     const form = qs('#createForm');
-    form?.addEventListener('submit', (e) => {
+    form?.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const artTitle = qs('#articleTitle').value.trim();
+      let articleId = null;
+      if (artTitle) {
+        try {
+          articleId = await createOrGetArticleByTitle(artTitle);
+        } catch (e2) {}
+        if (articleId) state.session.filters.articleId = articleId;
+      }
       const qv = qs('#q').value.trim();
       const av = qs('#a').value.trim();
       if (!qv || !av) return alert('Q と A は必須です');
       const rv = qs('#r').value.trim();
       const tagsv = qs('#tags').value.trim();
-      createQaAndAward(qv, av, rv, tagsv)
+      createQaAndAward(qv, av, rv, tagsv, articleId)
         .then(() => {
           alert('保存しました: +5XP');
           location.hash = '#/study';
@@ -581,12 +716,28 @@ function viewCreate() {
 }
 
 async function fetchRandomQa() {
-  const { collection, getDocs, query, where, limit } = fb.fs;
+  const { collection, getDocs, query, where, limit, orderBy } = fb.fs;
   const uid = fb.user?.uid;
   if (!uid) return null;
-  const q = query(collection(fb.db, 'qas'), where('uid', '==', uid), limit(50));
+  const filters = state.session.filters || {};
+  const today = getJstYmd();
+  let qCol = collection(fb.db, 'qas');
+  let q = query(qCol, where('uid', '==', uid), limit(100));
+  if (filters.articleId)
+    q = query(
+      qCol,
+      where('uid', '==', uid),
+      where('articleId', '==', filters.articleId),
+      limit(100),
+    );
   const snap = await getDocs(q);
-  const docs = snap.docs.filter((d) => !state.session.history.includes(d.id));
+  let docs = snap.docs.filter((d) => !state.session.history.includes(d.id));
+  if (filters.dueOnly)
+    docs = docs.filter((d) => {
+      const srs = d.data().srs;
+      if (!srs || !srs.nextDueYmd) return true;
+      return srs.nextDueYmd <= today;
+    });
   if (!docs.length) return null;
   const pick = docs[Math.floor(Math.random() * docs.length)];
   return { id: pick.id, ...pick.data() };
@@ -595,6 +746,12 @@ async function fetchRandomQa() {
 function viewStudy() {
   const div = document.createElement('div');
   const content = `
+    <div class="row" style="margin-bottom:.5rem;">
+      <label style="display:inline-flex;align-items:center;gap:.35rem;">
+        <input type="checkbox" id="dueOnly" ${state.session.filters.dueOnly ? 'checked' : ''}/> 復習のみ
+      </label>
+      <input id="articleFilter" placeholder="記事ID（任意）" style="flex:1;min-width:240px;" value="${state.session.filters.articleId || ''}"/>
+    </div>
     <div class="dq" id="studyBox">
       <div id="qText">問題を読み、答えを思い浮かべてください。</div>
       <div id="aText" style="display:none;margin-top:.5rem;">（答え）</div>
@@ -618,6 +775,18 @@ function setupStudy() {
   const ok = qs('#okBtn');
   const ng = qs('#ngBtn');
   const log = qs('#log');
+  const dueOnly = qs('#dueOnly');
+  const articleFilter = qs('#articleFilter');
+  dueOnly?.addEventListener('change', () => {
+    state.session.filters.dueOnly = !!dueOnly.checked;
+    state.session.history = [];
+    load();
+  });
+  articleFilter?.addEventListener('change', () => {
+    state.session.filters.articleId = articleFilter.value.trim() || null;
+    state.session.history = [];
+    load();
+  });
   async function load() {
     const qa = await fetchRandomQa();
     if (!qa) {
@@ -642,6 +811,9 @@ function setupStudy() {
   ok.onclick = async () => {
     try {
       const { isCritical, gain, leveledUp } = await awardCorrectXpAndUpdate(1);
+      // SRS 更新（正解）
+      const lastId = state.session.history[state.session.history.length - 1];
+      if (lastId) await updateQaSrs(lastId, true);
       const line1 = isCritical
         ? `<span class="crit">✨ 会心のいちげき！ ✨／けいけんちを ${gain} かくとく！</span>`
         : `<span>正解だった！／けいけんちを ${gain} かくとく！</span>`;
@@ -656,7 +828,10 @@ function setupStudy() {
   };
   ng.onclick = () => {
     log.innerHTML = `<span class="miss">……まちがえてしまった。</span>`;
-    setTimeout(load, 500);
+    // SRS 更新（不正解）
+    const lastId = state.session.history[state.session.history.length - 1];
+    if (lastId) updateQaSrs(lastId, false).finally(() => setTimeout(load, 500));
+    else setTimeout(load, 500);
   };
   load();
 }
