@@ -17,7 +17,7 @@
       href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=20250902-8" />
+    <link rel="stylesheet" href="./styles.css?v=20250902-11" />
     <!-- Firebase 設定（window.CLQ_FIREBASE_CONFIG を提供） -->
     <script src="./config.js?v=20250902-8"></script>
   </head>
@@ -37,12 +37,23 @@
 
     <main id="app" class="container"></main>
 
+    <nav id="tabbar" class="tabbar" aria-label="下部ナビゲーション">
+      <a href="#/home" data-route>🏠 ホーム</a>
+      <a href="#/articles" data-route>📚 記事</a>
+      <a href="#/create" data-route>✍️ 作問</a>
+      <a href="#/study" data-route>🗡 学習 <span id="tabStudyBadge" class="badge" hidden></span></a>
+      <a href="#/profile" data-route>👤 プロフ</a>
+    </nav>
+
     <footer class="footer">
       <small>© CliniQuest</small>
       <button id="installBtn" class="btn secondary" hidden>アプリをインストール</button>
       <span id="onlineStatus" class="status"></span>
     </footer>
 
-    <script type="module" src="./app.js?v=20250902-10"></script>
+    <div id="offlineBanner" class="banner" hidden>オフラインで動作中</div>
+    <div id="toastRoot" class="toast-root" aria-live="polite" aria-atomic="true"></div>
+
+    <script type="module" src="./app.js?v=20250902-11"></script>
   </body>
 </html>

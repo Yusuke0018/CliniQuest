@@ -35,6 +35,14 @@ const onlineStatusEl = qs('#onlineStatus');
 function updateOnline() {
   if (!onlineStatusEl) return;
   onlineStatusEl.textContent = navigator.onLine ? 'オンライン' : 'オフライン';
+  const banner = qs('#offlineBanner');
+  if (banner) {
+    if (navigator.onLine) banner.classList.remove('show');
+    else {
+      banner.hidden = false;
+      requestAnimationFrame(() => banner.classList.add('show'));
+    }
+  }
 }
 window.addEventListener('online', updateOnline);
 window.addEventListener('offline', updateOnline);
@@ -70,6 +78,8 @@ function applyTheme(theme) {
   localStorage.setItem('clq.theme', theme);
   const btn = qs('#themeToggle');
   if (btn) btn.textContent = theme === 'dark' ? '🌞 ライト' : '🌙 ダーク(DQ)';
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', theme === 'dark' ? '#0b2550' : '#ffffff');
 }
 
 function initTheme() {
@@ -731,6 +741,36 @@ function render() {
     if (a.getAttribute('href') === `#${path}`) a.classList.add('active');
     else a.classList.remove('active');
   });
+  // 下部タブの活性
+  qsa('#tabbar [data-route]').forEach((a) => {
+    if (a.getAttribute('href') === `#${path}`) a.classList.add('active');
+    else a.classList.remove('active');
+  });
+  // タイトル更新
+  const titleMap = {
+    '/home': 'ホーム',
+    '/articles': '記事',
+    '/article': '記事',
+    '/create': '作問',
+    '/study': '学習',
+    '/profile': 'プロフィール',
+  };
+  document.title = `CliniQuest - ${titleMap[path] || 'ホーム'}`;
+  // 学習バッジ更新（非同期）
+  setTimeout(async () => {
+    try {
+      const n = await countDueToday();
+      const bd = qs('#tabStudyBadge');
+      if (bd) {
+        if (n > 0) {
+          bd.textContent = String(n);
+          bd.hidden = false;
+        } else {
+          bd.hidden = true;
+        }
+      }
+    } catch {}
+  }, 0);
 }
 
 // -------- Views (MVPプレースホルダ) --------
@@ -805,11 +845,30 @@ async function setupArticles() {
   const uid = fb.user?.uid;
   const listEl = qs('#artList');
   const form = qs('#artForm');
+  // 検索欄を追加（存在しなければ）
+  if (!qs('#artSearch')) {
+    const cont = qs('#app .window');
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.marginBottom = '.5rem';
+    row.innerHTML =
+      '<input id="artSearch" placeholder="記事を検索（タイトル/本文）" style="flex:1;min-width:240px;"/>';
+    cont?.insertBefore(row, cont.children[1]);
+  }
+  const search = qs('#artSearch');
   async function refresh() {
     if (!uid) return;
     const snap = await getDocs(query(collection(fb.db, 'articles'), where('uid', '==', uid)));
     const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    listEl.innerHTML = items
+    const term = (search?.value || '').trim().toLowerCase();
+    const filtered = term
+      ? items.filter(
+          (it) =>
+            (it.title || '').toLowerCase().includes(term) ||
+            (it.body || '').toLowerCase().includes(term),
+        )
+      : items;
+    listEl.innerHTML = filtered
       .map(
         (it) => `
       <div class="card">
@@ -846,6 +905,7 @@ async function setupArticles() {
     qs('#artBody').value = '';
     refresh();
   });
+  search?.addEventListener('input', () => refresh());
   refresh();
 }
 
@@ -906,8 +966,15 @@ function viewArticle() {
       wrap.innerHTML = `
         <h2 class="title">${article.title}</h2>
         <div class="card" style="background:transparent;border:none;padding:0;">
-          <div>${html}</div>
+          <div id="articleBodyHtml">${html}</div>
         </div>
+        <details class="card" style="margin-top:.75rem;"><summary>この記事を編集</summary>
+          <div class="field" style="margin-top:.5rem;">
+            <label>本文（Markdown）</label>
+            <textarea id="editBody" rows="10">${article.body || ''}</textarea>
+          </div>
+          <div class="row"><button id="saveArticle" class="btn">保存</button></div>
+        </details>
         <div class="row" style="margin-top:.75rem;">
           <a class="btn secondary" href="#/articles">記事一覧</a>
           <a class="btn" href="#/study" onclick="window.CLQ_setArticle('${article.id}')">この記事で出題</a>
@@ -926,6 +993,22 @@ function viewArticle() {
           }
         </div>
       `;
+      const saveBtn = qs('#saveArticle', wrap);
+      saveBtn?.addEventListener('click', async () => {
+        try {
+          const body = qs('#editBody', wrap).value;
+          const { doc, updateDoc, serverTimestamp } = fb.fs;
+          await updateDoc(doc(fb.db, 'articles', article.id), {
+            body,
+            updatedAt: serverTimestamp(),
+          });
+          // 再描画
+          showToast && showToast('記事を保存しました');
+          location.hash = `#/article?slug=${encodeURIComponent(article.slug)}`;
+        } catch (err) {
+          alert('保存に失敗しました: ' + (err?.message || err));
+        }
+      });
     } catch (e) {
       console.error(e);
       wrap.innerHTML = `<div class=\"card\">読み込みに失敗しました: ${e?.message || e}</div>`;
@@ -1262,3 +1345,16 @@ render();
 initFirebase();
 initTheme();
 attachSwipeNav();
+
+// -------- Toast utility --------
+function showToast(msg, ms = 2000) {
+  const root = qs('#toastRoot');
+  if (!root) return;
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  root.appendChild(el);
+  setTimeout(() => {
+    el.remove();
+  }, ms);
+}
