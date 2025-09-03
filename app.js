@@ -237,7 +237,7 @@ const state = {
   userDoc: null,
   session: {
     history: [],
-    filters: { dueOnly: true, articleId: null, studyMode: 'due', ageDays: 3 },
+    filters: { dueOnly: true, articleId: null, qaId: null, studyMode: 'due', ageDays: 3 },
   },
 };
 
@@ -1401,9 +1401,58 @@ function viewCreate() {
         alert('削除に失敗しました: ' + (e?.message || e));
       }
     };
-    window.CLQ_setArticleFromQa = (articleId) => {
+    window.CLQ_setArticleFromQa = (articleId, qaId) => {
       state.session.filters.articleId = articleId || null;
+      state.session.filters.qaId = qaId || null;
       location.hash = '#/study';
+    };
+    window.CLQ_editQa = async (id) => {
+      try {
+        const { doc, getDoc, updateDoc, serverTimestamp } = fb.fs;
+        const ref = doc(fb.db, 'qas', id);
+        const snap = await getDoc(ref);
+        if (!snap.exists()) return alert('問題が見つかりません');
+        const v = snap.data();
+        const q0 = v.question || '';
+        const a0 = v.answer || '';
+        const r0 = v.rationale || '';
+        const t0 = (v.tags || []).join(', ');
+        const d0 = v.srs?.nextDueYmd
+          ? `${v.srs.nextDueYmd.slice(0, 4)}-${v.srs.nextDueYmd.slice(4, 6)}-${v.srs.nextDueYmd.slice(6, 8)}`
+          : '';
+        const q1 = prompt('問題（Q）', q0);
+        if (q1 == null) return; // cancel
+        const a1 = prompt('答え（A）', a0);
+        if (a1 == null) return;
+        const r1 = prompt('解説（任意）', r0);
+        if (r1 == null) return;
+        const t1 = prompt('タグ（カンマ区切り・任意）', t0);
+        if (t1 == null) return;
+        const d1 = prompt('次の期日（YYYY-MM-DD、省略可）', d0);
+        if (d1 == null) return;
+        const tags = (t1 || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => s.length);
+        const patch = {
+          question: (q1 || '').trim(),
+          answer: (a1 || '').trim(),
+          rationale: (r1 || '').trim() || null,
+          tags,
+          updatedAt: serverTimestamp(),
+        };
+        if (d1 && /^\d{4}-\d{2}-\d{2}$/.test(d1)) {
+          const ymd = d1.replace(/-/g, '');
+          const cur = v.srs || { reps: 0, ease: 2.5, interval: 0 };
+          patch.srs = { ...cur, nextDueYmd: ymd };
+        }
+        await updateDoc(ref, patch);
+        showToast && showToast('問題を更新しました');
+        refreshQaList();
+      } catch (e) {
+        console.error(e);
+        alert('更新に失敗しました: ' + (e?.message || e));
+      }
     };
     async function refreshQaList() {
       const uid = fb.user?.uid;
@@ -1436,7 +1485,7 @@ function viewCreate() {
           items
             .map(
               (it) => `
-          <div class=\"card\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0, 6)})</small></div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <a class=\"btn secondary\" href=\"#/study\" onclick=\"window.CLQ_setArticleFromQa('${it.articleId || ''}')\">この記事で出題</a>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`,
+          <div class=\"card\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0, 6)})</small></div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <a class=\"btn secondary\" href=\"#/study\" onclick=\"window.CLQ_setArticleFromQa('${it.articleId || ''}','${it.id}')\">この問題で出題</a>\n              <button class=\"btn\" onclick=\"window.CLQ_editQa('${it.id}')\">編集</button>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`,
             )
             .join('') || '<div class="muted">（該当なし）</div>';
       } catch (err) {
@@ -1451,10 +1500,19 @@ function viewCreate() {
 
 async function fetchRandomQa() {
   if (!fb.fs) return null;
-  const { collection, getDocs, query, where, limit, orderBy } = fb.fs;
+  const { collection, getDocs, query, where, limit, orderBy, doc, getDoc } = fb.fs;
   const uid = fb.user?.uid;
   if (!uid) return null;
   const filters = state.session.filters || {};
+  // 明示指定のQAがあればそれを優先
+  if (filters.qaId) {
+    try {
+      const ref = doc(fb.db, 'qas', filters.qaId);
+      const s = await getDoc(ref);
+      state.session.filters.qaId = null; // 一度限り
+      if (s.exists() && s.data().uid === uid) return { id: s.id, ...s.data() };
+    } catch {}
+  }
   const today = getJstYmd();
   let qCol = collection(fb.db, 'qas');
   let q = query(qCol, where('uid', '==', uid), limit(100));
@@ -1499,7 +1557,7 @@ function viewStudy() {
       <label style="display:inline-flex;align-items:center;gap:.35rem;">
         <span>出題モード</span>
         <select id="studyMode">
-          <option value="due" ${state.session.filters.studyMode === 'due' ? 'selected' : ''}>復習（期日到来）</option>
+          <option value="due" ${state.session.filters.studyMode === 'due' ? 'selected' : ''}>復習（期日到来・自動）</option>
           <option value="random" ${state.session.filters.studyMode === 'random' ? 'selected' : ''}>ランダム（すべて）</option>
           <option value="age" ${state.session.filters.studyMode === 'age' ? 'selected' : ''}>経過日数指定</option>
         </select>
@@ -1510,6 +1568,7 @@ function viewStudy() {
       </label>
       <input id="articleFilter" placeholder="記事ID（任意）" style="flex:1;min-width:240px;" value="${state.session.filters.articleId || ''}"/>
     </div>
+    <div class="muted" style="margin:.25rem 0;">※ 期日は学習結果に応じて自動設定されます。個別に変更する場合は作問一覧の「編集」から次の期日を変更できます。</div>
     <div class="dq" id="studyBox">
       <div id="qText">問題を読み、答えを思い浮かべてください。</div>
       <div id="aText" style="display:none;margin-top:.5rem;">（答え）</div>
