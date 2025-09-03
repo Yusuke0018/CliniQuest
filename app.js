@@ -1166,8 +1166,15 @@ function viewArticles() {
     <form id="artForm" class="grid">
       <div class="field"><label>記事タイトル</label><input id="artTitle" required placeholder="例: 肺炎の初期対応"/></div>
       <div class="field"><label>本文（Markdown、[[リンク]]可）</label><textarea id="artBody" rows="8" placeholder="例: 肺炎の初期対応では [[抗菌薬選択]] を参照..."></textarea></div>
+      <div class="field"><label>タグ（カンマ区切り・任意）</label><input id="artTagsInput" placeholder="例: 感染症, 抗菌薬"/></div>
       <div class="row"><button class="btn" type="submit">記事を保存</button></div>
     </form>
+    <details class="card" id="artRelPane" style="margin-top:.25rem;"><summary>関連する記事（相互リンク）</summary>
+      <div class="row" style="gap:.5rem;flex-wrap:wrap;margin-top:.5rem;">
+        <input id="artRelSearch" placeholder="記事を検索（タイトル）" style="flex:1;min-width:240px;"/>
+      </div>
+      <div id="artRelList" class="grid" style="margin-top:.5rem;"></div>
+    </details>
     <div id="artList" class="grid" style="margin-top:1rem;"></div>
     <details class="card" id="artSearchPane" style="margin-top:.75rem;"><summary>記事を検索</summary>
       <div class="row" style="gap:.5rem;flex-wrap:wrap;margin-top:.5rem;">
@@ -1187,6 +1194,41 @@ async function setupArticles() {
   const search = qs('#artSearch');
   let selectedTag = '';
   let tagsEl = qs('#artTags') || null;
+  // 新規作成用の関連記事選択UI
+  const relSearchC = qs('#artRelSearch');
+  const relListC = qs('#artRelList');
+  let relSelectedCreate = new Set();
+  async function renderRelCreateList() {
+    if (!relListC) return;
+    try {
+      const uidNow = fb.user?.uid;
+      if (!uidNow) return;
+      const snap = await getDocs(query(collection(fb.db, 'articles'), where('uid', '==', uidNow)));
+      const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const term = (relSearchC?.value || '').trim().toLowerCase();
+      const filtered = term
+        ? all.filter((it) => (it.title || '').toLowerCase().includes(term))
+        : all;
+      relListC.innerHTML =
+        filtered
+          .map(
+            (it) =>
+              `<label class="row" style="align-items:center;"><input class="relCheckC" type="checkbox" value="${it.id}" ${
+                relSelectedCreate.has(it.id) ? 'checked' : ''
+              }/> <span>${it.title || '(無題)'} <small class="muted">(${it.id.slice(0, 6)})</small></span></label>`,
+          )
+          .join('') || '<div class="muted">（該当なし）</div>';
+      relListC.querySelectorAll('.relCheckC').forEach((chk) =>
+        chk.addEventListener('change', () => {
+          const id = chk.value;
+          if (chk.checked) relSelectedCreate.add(id);
+          else relSelectedCreate.delete(id);
+        }),
+      );
+    } catch (e) {}
+  }
+  relSearchC?.addEventListener('input', () => renderRelCreateList());
+  renderRelCreateList();
   // グラフ表示のUIとオーバーレイ（SVG）を動的に用意
   let graphOn = false;
   function ensureGraphUi() {
@@ -1379,6 +1421,11 @@ async function setupArticles() {
     e.preventDefault();
     const title = qs('#artTitle').value.trim();
     const body = qs('#artBody').value;
+    const tagsCsv = qs('#artTagsInput')?.value || '';
+    const tags = tagsCsv
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length);
     if (!title) {
       alert('タイトルは必須です');
       return;
@@ -1395,11 +1442,29 @@ async function setupArticles() {
         title,
         slug,
         body,
-        tags: [],
+        tags,
+        links: Array.from(relSelectedCreate),
         createdXpAwarded: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+      // 相互リンク: 選択した記事に対し、この新規記事IDを追加
+      try {
+        const newId = artRef.id;
+        await Promise.all(
+          Array.from(relSelectedCreate).map((id) =>
+            fb.fs.runTransaction(fb.db, async (tx) => {
+              const r = fb.fs.doc(fb.db, 'articles', id);
+              const s = await tx.get(r);
+              if (!s.exists()) return;
+              const v = s.data();
+              const set = new Set(Array.isArray(v.links) ? v.links : []);
+              set.add(newId);
+              tx.update(r, { links: Array.from(set), updatedAt: serverTimestamp() });
+            }),
+          ),
+        );
+      } catch (e) {}
       // 記事作成時にも +5XP（記録用フラグはベストエフォート）
       fb.fs
         .runTransaction(fb.db, async (tx) => {
