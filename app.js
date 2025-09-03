@@ -537,6 +537,13 @@ function ymdDiff(a, b) {
   return Math.round((da - db) / (24 * 3600 * 1000));
 }
 
+// yyyymmdd に日数を加算（JST基準）
+function addDaysToYmd(ymd, days) {
+  const base = ymdToJstDate(ymd);
+  const next = new Date(base.getTime() + days * 24 * 3600 * 1000);
+  return getJstYmd(next);
+}
+
 function nextStreak(streak, todayYmd) {
   const last = streak?.lastActiveYmd || null;
   if (!last) return { current: 1, best: 1, lastActiveYmd: todayYmd };
@@ -555,6 +562,65 @@ function logsDailyDocRef(uid, ymd) {
   const { doc } = fb.fs;
   // users/{uid}/logs_daily/{ymd} に保存（権限管理しやすくする）
   return doc(fb.db, 'users', uid, 'logs_daily', ymd);
+}
+
+// 今日の復習数を数える（期日到来 or nextDueYmd 未設定）
+async function countDueToday(limitN = 500) {
+  if (!fb.fs) return 0;
+  const { collection, getDocs, query, where, limit } = fb.fs;
+  const uid = fb.user?.uid;
+  if (!uid) return 0;
+  const today = getJstYmd();
+  const snap = await getDocs(
+    query(collection(fb.db, 'qas'), where('uid', '==', uid), limit(limitN)),
+  );
+  return snap.docs.filter((d) => {
+    const srs = d.data().srs;
+    if (!srs || !srs.nextDueYmd) return true;
+    return srs.nextDueYmd <= today;
+  }).length;
+}
+
+// 学習の正誤に応じて SRS を更新
+async function updateQaSrs(qaId, isCorrect) {
+  if (!fb.fs) throw new Error('Firestore 未初期化');
+  const { doc, runTransaction, serverTimestamp, getDoc } = fb.fs;
+  const uid = fb.user?.uid;
+  if (!uid) throw new Error('未サインイン');
+  const ref = doc(fb.db, 'qas', qaId);
+  await runTransaction(fb.db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('QA not found');
+    const v = snap.data();
+    if (v.uid !== uid) throw new Error('権限がありません');
+    const cur = v.srs || {
+      reps: 0,
+      ease: 2.5,
+      interval: 0,
+      nextDueYmd: getJstYmd(),
+      lastReviewedAt: null,
+    };
+    let reps = Number(cur.reps || 0);
+    let ease = typeof cur.ease === 'number' ? cur.ease : 2.5;
+    let interval = Number(cur.interval || 0);
+    if (isCorrect) {
+      reps += 1;
+      ease = Math.max(1.3, Math.round((ease + 0.02) * 100) / 100);
+      if (reps === 1) interval = 1;
+      else if (reps === 2) interval = 3;
+      else interval = Math.max(1, Math.round(interval * ease));
+    } else {
+      reps = 0;
+      interval = 0;
+      ease = Math.max(1.3, Math.round((ease - 0.2) * 100) / 100);
+    }
+    const today = getJstYmd();
+    const nextDue = interval > 0 ? addDaysToYmd(today, interval) : today;
+    tx.update(ref, {
+      srs: { reps, ease, interval, nextDueYmd: nextDue, lastReviewedAt: serverTimestamp() },
+      updatedAt: serverTimestamp(),
+    });
+  });
 }
 
 async function createQaAndAward(q, a, r, tagsCsv, articleIdArg = null) {
