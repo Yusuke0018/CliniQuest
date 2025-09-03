@@ -1250,6 +1250,12 @@ async function setupArticles() {
           const toId = idBySlug.get(toSlug);
           if (toId && toId !== it.id) links.push([it.id, toId]);
         }
+        // links フィールドによる相互リンクも線で可視化
+        if (Array.isArray(it.links)) {
+          for (const to of it.links) {
+            if (to && to !== it.id) links.push([it.id, to]);
+          }
+        }
       }
       const nodes = new Map();
       wrap.querySelectorAll('[data-article-id]')?.forEach((el) => {
@@ -1497,7 +1503,13 @@ function viewArticle() {
       const allSnap = await getDocs(query(collection(fb.db, 'articles'), where('uid', '==', uid)));
       const re = new RegExp(`\\[\\[${escapeRegExp(article.title)}\\]\\]`);
       const backs = allSnap.docs
-        .filter((d) => d.id !== article.id && re.test(d.data().body || ''))
+        .filter((d) => {
+          if (d.id === article.id) return false;
+          const v = d.data();
+          const linkInBody = re.test(v.body || '');
+          const linkByField = Array.isArray(v.links) && v.links.includes(article.id);
+          return linkInBody || linkByField;
+        })
         .map((d) => ({ id: d.id, title: d.data().title, slug: d.data().slug }));
 
       wrap.innerHTML = `
@@ -1512,6 +1524,12 @@ function viewArticle() {
           </div>
           <div class="field"><label>タグ（カンマ区切り）</label><input id="editTags" value="${(article.tags || []).join(', ')}"/></div>
           <div class="row"><button id="saveArticle" class="btn">保存</button></div>
+        </details>
+        <details class="card" style="margin-top:.75rem;"><summary>関連する記事を選択（相互リンク）</summary>
+          <div class="row" style="gap:.5rem;flex-wrap:wrap;margin-top:.5rem;">
+            <input id="relSearch" placeholder="記事を検索（タイトル）" style="flex:1;min-width:240px;"/>
+          </div>
+          <div id="relList" class="grid" style="margin-top:.5rem;"></div>
         </details>
         <div class="card" style="margin-top:.5rem;">
           <div class="muted">危険な操作</div>
@@ -1539,6 +1557,39 @@ function viewArticle() {
           }
         </div>
       `;
+      const relSearch = qs('#relSearch', wrap);
+      const relList = qs('#relList', wrap);
+      let relSelected = new Set(Array.isArray(article.links) ? article.links : []);
+      async function renderRelatedList() {
+        try {
+          const allQ = query(collection(fb.db, 'articles'), where('uid', '==', uid));
+          const all = (await getDocs(allQ)).docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .filter((a) => a.id !== article.id);
+          const term = (relSearch?.value || '').trim().toLowerCase();
+          const filtered = term
+            ? all.filter((it) => (it.title || '').toLowerCase().includes(term))
+            : all;
+          relList.innerHTML =
+            filtered
+              .map(
+                (it) =>
+                  `<label class="row" style="align-items:center;"><input class="relCheck" type="checkbox" value="${it.id}" ${
+                    relSelected.has(it.id) ? 'checked' : ''
+                  }/> <span>${it.title || '(無題)'} <small class="muted">(${it.id.slice(0, 6)})</small></span></label>`,
+              )
+              .join('') || '<div class="muted">（該当なし）</div>';
+          relList.querySelectorAll('.relCheck').forEach((chk) =>
+            chk.addEventListener('change', () => {
+              const id = chk.value;
+              if (chk.checked) relSelected.add(id);
+              else relSelected.delete(id);
+            }),
+          );
+        } catch (e) {}
+      }
+      relSearch?.addEventListener('input', () => renderRelatedList());
+      if (relList) renderRelatedList();
       const saveBtn = qs('#saveArticle', wrap);
       saveBtn?.addEventListener('click', async () => {
         try {
@@ -1548,11 +1599,42 @@ function viewArticle() {
             .map((s) => s.trim())
             .filter(Boolean);
           const { doc, updateDoc, serverTimestamp, runTransaction } = fb.fs;
+          const selIds = Array.from(relSelected);
+          const before = new Set(Array.isArray(article.links) ? article.links : []);
+          const after = new Set(selIds);
+          const added = selIds.filter((id) => !before.has(id));
+          const removed = Array.from(before).filter((id) => !after.has(id));
           await updateDoc(doc(fb.db, 'articles', article.id), {
             body,
             tags: tagsv,
+            links: selIds,
             updatedAt: serverTimestamp(),
           });
+          // reciprocal updates
+          await Promise.all([
+            ...added.map((id) =>
+              runTransaction(fb.db, async (tx) => {
+                const r = doc(fb.db, 'articles', id);
+                const s = await tx.get(r);
+                if (!s.exists()) return;
+                const v = s.data();
+                const set = new Set(Array.isArray(v.links) ? v.links : []);
+                set.add(article.id);
+                tx.update(r, { links: Array.from(set), updatedAt: serverTimestamp() });
+              }),
+            ),
+            ...removed.map((id) =>
+              runTransaction(fb.db, async (tx) => {
+                const r = doc(fb.db, 'articles', id);
+                const s = await tx.get(r);
+                if (!s.exists()) return;
+                const v = s.data();
+                const set = new Set(Array.isArray(v.links) ? v.links : []);
+                set.delete(article.id);
+                tx.update(r, { links: Array.from(set), updatedAt: serverTimestamp() });
+              }),
+            ),
+          ]);
           // 記事保存時に +5XP（共通ロジック）
           try {
             await awardXp(5);
