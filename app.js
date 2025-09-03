@@ -669,7 +669,7 @@ async function updateQaSrs(qaId, isCorrect) {
 
 // 問題編集用のモーダル（問/答え/解説/タグ/次の期日）
 async function openQaEditDialog(qaId) {
-  const { doc, getDoc, updateDoc, serverTimestamp } = fb.fs;
+  const { doc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } = fb.fs;
   const uid = fb.user?.uid;
   if (!uid) return alert('未サインインです');
   const ref = doc(fb.db, 'qas', qaId);
@@ -684,6 +684,19 @@ async function openQaEditDialog(qaId) {
     ? `${v.srs.nextDueYmd.slice(0, 4)}-${v.srs.nextDueYmd.slice(4, 6)}-${v.srs.nextDueYmd.slice(6, 8)}`
     : '';
 
+  // 記事一覧（自身のもの）
+  let artOptions = '<option value="">（なし）</option>';
+  try {
+    const as = await getDocs(query(collection(fb.db, 'articles'), where('uid', '==', uid)));
+    const items = as.docs.map((d) => ({ id: d.id, ...d.data() }));
+    artOptions += items
+      .map(
+        (it) =>
+          `<option value="${it.id}" ${v.articleId === it.id ? 'selected' : ''}>${(it.title || '(無題)').replace(/</g, '&lt;')}</option>`,
+      )
+      .join('');
+  } catch {}
+
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.style.cssText =
@@ -694,11 +707,15 @@ async function openQaEditDialog(qaId) {
     card.innerHTML = `
       <h2 class="title">問題を編集</h2>
       <form id="qaEditForm" class="grid">
+        <div class="field"><label>記事（任意）</label><select id="editArticle">${artOptions}</select></div>
         <div class="field"><label>問題（Q）</label><textarea id="editQ" rows="3">${q0.replace(/</g, '&lt;')}</textarea></div>
         <div class="field"><label>答え（A）</label><textarea id="editA" rows="3">${a0.replace(/</g, '&lt;')}</textarea></div>
         <div class="field"><label>解説（任意）</label><textarea id="editR" rows="3">${r0.replace(/</g, '&lt;')}</textarea></div>
         <div class="field"><label>タグ（カンマ区切り）</label><input id="editTags" value="${t0.replace(/"/g, '&quot;')}"/></div>
         <div class="field"><label>次の期日</label><input id="editDue" type="date" value="${d0}"/></div>
+        <details class="card"><summary>プレビュー</summary>
+          <div id="qaPreview" class="muted" style="white-space:pre-wrap;padding:.5rem;">（入力すると表示します）</div>
+        </details>
         <div class="row" style="justify-content:flex-end;gap:.5rem;">
           <button class="btn secondary" type="button" id="qaCancel">キャンセル</button>
           <button class="btn" type="submit">保存</button>
@@ -713,6 +730,35 @@ async function openQaEditDialog(qaId) {
       } catch {}
       resolve(ok);
     };
+
+    // 入力に応じてプレビュー更新
+    const updatePreview = () => {
+      const qv = card.querySelector('#editQ').value;
+      const av = card.querySelector('#editA').value;
+      const rv = card.querySelector('#editR').value;
+      const esc = (t) =>
+        String(t || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;');
+      const pv = card.querySelector('#qaPreview');
+      if (pv)
+        pv.innerHTML = `Q:
+${esc(qv)}
+
+A:
+${esc(av)}${
+          rv
+            ? `
+
+解説:
+${esc(rv)}`
+            : ''
+        }`;
+    };
+    ['#editQ', '#editA', '#editR'].forEach((sel) =>
+      card.querySelector(sel).addEventListener('input', updatePreview),
+    );
+    updatePreview();
     card.querySelector('#qaCancel').addEventListener('click', () => cleanup(false));
     card.querySelector('#qaEditForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -723,6 +769,8 @@ async function openQaEditDialog(qaId) {
         const t1 = card.querySelector('#editTags').value;
         const d1 = card.querySelector('#editDue').value; // yyyy-mm-dd
         if (!q1 || !a1) return alert('Q と A は必須です');
+        if (q1.length < 3 || a1.length < 1) return alert('内容が短すぎます');
+        const artSel = card.querySelector('#editArticle').value;
         const tags = (t1 || '')
           .split(',')
           .map((s) => s.trim())
@@ -734,6 +782,8 @@ async function openQaEditDialog(qaId) {
           tags,
           updatedAt: serverTimestamp(),
         };
+        patch.articleId = artSel || null;
+        patch.articleId = artSel || null;
         if (d1 && /^\d{4}-\d{2}-\d{2}$/.test(d1)) {
           const ymd = d1.replace(/-/g, '');
           const today = getJstYmd();
@@ -1867,7 +1917,8 @@ function setupStudy() {
       const lastId = state.session.history[state.session.history.length - 1];
       if (lastId) {
         try {
-          const { doc, getDoc, updateDoc, serverTimestamp } = fb.fs;
+          const { doc, getDoc, updateDoc, serverTimestamp, collection, query, where, getDocs } =
+            fb.fs;
           const ref = doc(fb.db, 'qas', lastId);
           const snap = await getDoc(ref);
           if (snap.exists()) {
