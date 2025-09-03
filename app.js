@@ -1197,6 +1197,28 @@ async function setupArticles() {
   const search = qs('#artSearch');
   let selectedTag = '';
   let tagsEl = qs('#artTags') || null;
+  // 並び替えセレクト（更新順/タイトル/リンク数）
+  let sortSel = qs('#artSort');
+  const searchPane = qs('#artSearchPane');
+  if (searchPane && !sortSel) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.gap = '.5rem';
+    row.style.marginTop = '.5rem';
+    row.innerHTML = `
+      <label style="display:inline-flex;align-items:center;gap:.35rem;">
+        <span>並び替え</span>
+        <select id="artSort">
+          <option value="updated">更新順</option>
+          <option value="title">タイトル</option>
+          <option value="links">リンク数</option>
+        </select>
+      </label>
+    `;
+    searchPane.appendChild(row);
+    sortSel = row.querySelector('#artSort');
+    sortSel?.addEventListener('change', () => refresh());
+  }
   // 新規作成用の関連記事選択UI
   const relSearchC = qs('#artRelSearch');
   const relListC = qs('#artRelList');
@@ -1331,15 +1353,19 @@ async function setupArticles() {
         const y = r.top - wrapRect.top + r.height / 2;
         nodes.set(id, { x, y });
       });
+      const focus = window.__artFocusId || null;
+      const edges = focus ? links.filter(([a, b]) => a === focus || b === focus) : links;
       const parts = [
         '<defs><marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#93c5fd"/></marker></defs>',
       ];
-      for (const [a, b] of links) {
+      for (const [a, b] of edges) {
         const na = nodes.get(a),
           nb = nodes.get(b);
         if (!na || !nb) continue;
+        const stroke = focus ? '#1d4ed8' : '#93c5fd';
+        const op = focus ? '0.95' : '0.7';
         parts.push(
-          `<line x1="${na.x}" y1="${na.y}" x2="${nb.x}" y2="${nb.y}" stroke="#93c5fd" stroke-width="2" marker-end="url(#arrow)" opacity="0.7" />`,
+          `<line x1="${na.x}" y1="${na.y}" x2="${nb.x}" y2="${nb.y}" stroke="${stroke}" stroke-width="2" marker-end="url(#arrow)" opacity="${op}" />`,
         );
       }
       graph.innerHTML = parts.join('');
@@ -1418,13 +1444,30 @@ async function setupArticles() {
     const byTag = selectedTag
       ? items.filter((it) => Array.isArray(it.tags) && it.tags.includes(selectedTag))
       : items;
-    const filtered = term
+    let filtered = term
       ? items.filter(
           (it) =>
             (it.title || '').toLowerCase().includes(term) ||
             (it.body || '').toLowerCase().includes(term),
         )
       : byTag;
+    // 並び替え
+    const mode = sortSel?.value || 'updated';
+    if (mode === 'title') {
+      filtered = filtered.slice().sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    } else if (mode === 'links') {
+      const cnt = (x) => (Array.isArray(x.links) ? x.links.length : 0);
+      filtered = filtered.slice().sort((a, b) => cnt(b) - cnt(a));
+    } else {
+      // updated (fallback: createdAt)
+      const ts = (x) =>
+        x.updatedAt && x.updatedAt.toMillis
+          ? x.updatedAt.toMillis()
+          : x.createdAt && x.createdAt.toMillis
+            ? x.createdAt.toMillis()
+            : 0;
+      filtered = filtered.slice().sort((a, b) => ts(b) - ts(a));
+    }
     listEl.innerHTML = filtered
       .map(
         (it) => `
@@ -1450,6 +1493,19 @@ async function setupArticles() {
     lastItems = filtered;
     ensureGraphUi();
     setTimeout(() => drawGraph(filtered), 0);
+    // フォーカス強調（カードクリックで近接のみ表示）
+    listEl.addEventListener('click', (e) => {
+      const card = e.target.closest('.card');
+      if (!card) return;
+      const id = card.getAttribute('data-article-id');
+      if (!id) return;
+      if (window.__artFocusId === id) window.__artFocusId = null;
+      else window.__artFocusId = id;
+      // 見た目の強調
+      listEl.querySelectorAll('.card').forEach((c) => (c.style.outline = ''));
+      if (window.__artFocusId) card.style.outline = '2px solid var(--accent)';
+      drawGraph(lastItems);
+    });
   }
   window.CLQ_setArticle = (id) => {
     state.session.filters.articleId = id;
@@ -1656,6 +1712,7 @@ function viewArticle() {
             <textarea id="editBody" rows="10">${article.body || ''}</textarea>
           </div>
           <div class="field"><label>タグ（カンマ区切り）</label><input id="editTags" value="${(article.tags || []).join(', ')}"/></div>
+          <div id="editTagsAuto" class="row" style="gap:.35rem;flex-wrap:wrap;"></div>
           <div class="row"><button id="saveArticle" class="btn">保存</button></div>
         </details>
         <details class="card" style="margin-top:.75rem;"><summary>関連する記事を選択（相互リンク）</summary>
@@ -1693,6 +1750,36 @@ function viewArticle() {
       const relSearch = qs('#relSearch', wrap);
       const relList = qs('#relList', wrap);
       let relSelected = new Set(Array.isArray(article.links) ? article.links : []);
+      // 編集用タグサジェスト
+      try {
+        const tagsArea = qs('#editTagsAuto', wrap);
+        if (tagsArea) {
+          const allTags = new Map();
+          allSnap.docs.forEach((d) =>
+            (d.data().tags || []).forEach((t) => allTags.set(t, (allTags.get(t) || 0) + 1)),
+          );
+          tagsArea.innerHTML = Array.from(allTags.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 20)
+            .map(([t]) => `<span class="tagchip" data-tag="${t}">#${t}</span>`)
+            .join('');
+          const input = qs('#editTags', wrap);
+          tagsArea.querySelectorAll('.tagchip').forEach((el) =>
+            el.addEventListener('click', () => {
+              const t = el.getAttribute('data-tag');
+              const cur = (input?.value || '').trim();
+              const arr = cur
+                ? cur
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                : [];
+              if (!arr.includes(t)) arr.push(t);
+              if (input) input.value = arr.join(', ');
+            }),
+          );
+        }
+      } catch (e) {}
       async function renderRelatedList() {
         try {
           const allQ = query(collection(fb.db, 'articles'), where('uid', '==', uid));
