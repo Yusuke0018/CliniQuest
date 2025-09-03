@@ -1384,6 +1384,7 @@ function viewCreate() {
 }
 
 async function fetchRandomQa() {
+  if (!fb.fs) return null;
   const { collection, getDocs, query, where, limit, orderBy } = fb.fs;
   const uid = fb.user?.uid;
   if (!uid) return null;
@@ -1832,11 +1833,15 @@ function setupProfileAuth() {
   }
 }
 
-// 初期化
-render();
-initFirebase();
+// 初期化（Firebase を先に初期化してから描画）
+try {
+  await initFirebase();
+} catch (e) {
+  console.warn('Firebase 初期化に失敗', e);
+}
 initTheme();
 attachSwipeNav();
+render();
 
 // -------- Toast utility --------
 function showToast(msg, ms = 2000) {

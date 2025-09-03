@@ -45,9 +45,10 @@ service cloud.firestore {
       allow create: if isOwnerCreating();
       allow read, update, delete: if isOwnerExisting();
     }
-    match /logs_daily/{docId} {
-      allow create: if isOwnerCreating();
-      allow read, update, delete: if isOwnerExisting();
+    // 変更点: logs_daily は users/{uid}/logs_daily/{ymd} サブコレクションに保存します
+    match /users/{uid}/logs_daily/{ymd} {
+      allow create: if request.auth != null && request.auth.uid == uid;
+      allow read, update, delete: if request.auth != null && request.auth.uid == uid;
     }
   }
 }
