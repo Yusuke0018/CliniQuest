@@ -1167,12 +1167,15 @@ function viewArticles() {
       <div class="field"><label>記事タイトル</label><input id="artTitle" required placeholder="例: 肺炎の初期対応"/></div>
       <div class="field"><label>本文（Markdown、[[リンク]]可）</label><textarea id="artBody" rows="8" placeholder="例: 肺炎の初期対応では [[抗菌薬選択]] を参照..."></textarea></div>
       <div class="field"><label>タグ（カンマ区切り・任意）</label><input id="artTagsInput" placeholder="例: 感染症, 抗菌薬"/></div>
+      <div id="artTagsSuggest" class="row" style="gap:.35rem;flex-wrap:wrap;"></div>
       <div class="row"><button class="btn" type="submit">記事を保存</button></div>
     </form>
     <details class="card" id="artRelPane" style="margin-top:.25rem;"><summary>関連する記事（相互リンク）</summary>
       <div class="row" style="gap:.5rem;flex-wrap:wrap;margin-top:.5rem;">
         <input id="artRelSearch" placeholder="記事を検索（タイトル）" style="flex:1;min-width:240px;"/>
       </div>
+      <div id="relSelectedChipsC" class="row" style="gap:.35rem;margin:.25rem 0;flex-wrap:wrap;"></div>
+      <label style="display:inline-flex;align-items:center;gap:.35rem;margin:.25rem 0;"><input id="artRelAutoInsert" type="checkbox"/> 本文に [[タイトル]] を自動挿入（未包含のみ）</label>
       <div id="artRelList" class="grid" style="margin-top:.5rem;"></div>
     </details>
     <div id="artList" class="grid" style="margin-top:1rem;"></div>
@@ -1198,6 +1201,24 @@ async function setupArticles() {
   const relSearchC = qs('#artRelSearch');
   const relListC = qs('#artRelList');
   let relSelectedCreate = new Set();
+  const relSelectedChipsC = qs('#relSelectedChipsC');
+  function renderRelSelectedChipsC(mapById) {
+    if (!relSelectedChipsC) return;
+    const ids = Array.from(relSelectedCreate);
+    relSelectedChipsC.innerHTML = ids
+      .map((id) => {
+        const title = mapById?.get(id)?.title || '(無題)';
+        return `<span class="tagchip" data-id="${id}">#${title} ×</span>`;
+      })
+      .join('');
+    relSelectedChipsC.querySelectorAll('.tagchip').forEach((chip) =>
+      chip.addEventListener('click', () => {
+        const id = chip.getAttribute('data-id');
+        relSelectedCreate.delete(id);
+        renderRelCreateList();
+      }),
+    );
+  }
   async function renderRelCreateList() {
     if (!relListC) return;
     try {
@@ -1205,6 +1226,7 @@ async function setupArticles() {
       if (!uidNow) return;
       const snap = await getDocs(query(collection(fb.db, 'articles'), where('uid', '==', uidNow)));
       const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const mapById = new Map(all.map((a) => [a.id, a]));
       const term = (relSearchC?.value || '').trim().toLowerCase();
       const filtered = term
         ? all.filter((it) => (it.title || '').toLowerCase().includes(term))
@@ -1223,8 +1245,10 @@ async function setupArticles() {
           const id = chk.value;
           if (chk.checked) relSelectedCreate.add(id);
           else relSelectedCreate.delete(id);
+          renderRelSelectedChipsC(mapById);
         }),
       );
+      renderRelSelectedChipsC(mapById);
     } catch (e) {}
   }
   relSearchC?.addEventListener('input', () => renderRelCreateList());
@@ -1363,6 +1387,34 @@ async function setupArticles() {
         );
       }
     } catch {}
+    // 新規作成フォーム下のタグサジェスト
+    try {
+      const sugg = qs('#artTagsSuggest');
+      if (sugg) {
+        const tags = new Map();
+        for (const it of items) (it.tags || []).forEach((t) => tags.set(t, (tags.get(t) || 0) + 1));
+        sugg.innerHTML = Array.from(tags.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 20)
+          .map(([t]) => `<span class="tagchip" data-tag="${t}">#${t}</span>`)
+          .join('');
+        const input = qs('#artTagsInput');
+        sugg.querySelectorAll('.tagchip').forEach((el) =>
+          el.addEventListener('click', () => {
+            const t = el.getAttribute('data-tag');
+            const cur = (input?.value || '').trim();
+            const arr = cur
+              ? cur
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+              : [];
+            if (!arr.includes(t)) arr.push(t);
+            if (input) input.value = arr.join(', ');
+          }),
+        );
+      }
+    } catch {}
     const byTag = selectedTag
       ? items.filter((it) => Array.isArray(it.tags) && it.tags.includes(selectedTag))
       : items;
@@ -1426,6 +1478,7 @@ async function setupArticles() {
       .split(',')
       .map((s) => s.trim())
       .filter((s) => s.length);
+    const autoInsert = !!qs('#artRelAutoInsert')?.checked;
     if (!title) {
       alert('タイトルは必須です');
       return;
@@ -1437,11 +1490,26 @@ async function setupArticles() {
     }
     try {
       const slug = slugify(title);
+      // 本文へ [[タイトル]] 自動挿入（未包含のみ）
+      let bodyToSave = body;
+      if (autoInsert && relSelectedCreate.size) {
+        try {
+          const uidNow2 = fb.user?.uid;
+          const snap2 = await getDocs(
+            query(collection(fb.db, 'articles'), where('uid', '==', uidNow2)),
+          );
+          const map2 = new Map(snap2.docs.map((d) => [d.id, d.data().title || '']));
+          const toAdd = Array.from(relSelectedCreate)
+            .map((id) => `[[${map2.get(id) || ''}]]`)
+            .filter((w) => w && !bodyToSave.includes(w));
+          if (toAdd.length) bodyToSave = bodyToSave + '\n\n' + toAdd.join(' ');
+        } catch (e) {}
+      }
       const artRef = await addDoc(collection(fb.db, 'articles'), {
         uid: uidNow,
         title,
         slug,
-        body,
+        body: bodyToSave,
         tags,
         links: Array.from(relSelectedCreate),
         createdXpAwarded: false,
