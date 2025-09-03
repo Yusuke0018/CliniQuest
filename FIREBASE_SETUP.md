@@ -33,6 +33,12 @@ service cloud.firestore {
     match /users/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
+    // 記事（オーナーのみ）
+    match /articles/{id} {
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow read, update, delete: if request.auth != null && resource.data.uid == request.auth.uid;
+    }
+
     match /qas/{id} {
       allow create: if isOwnerCreating();
       allow read, update, delete: if isOwnerExisting();
