@@ -1401,11 +1401,7 @@ function viewCreate() {
         alert('削除に失敗しました: ' + (e?.message || e));
       }
     };
-    window.CLQ_setArticleFromQa = (articleId, qaId) => {
-      state.session.filters.articleId = articleId || null;
-      state.session.filters.qaId = qaId || null;
-      location.hash = '#/study';
-    };
+    // 「この問題で出題」は不要のため機能を提供しません
     window.CLQ_editQa = async (id) => {
       try {
         const { doc, getDoc, updateDoc, serverTimestamp } = fb.fs;
@@ -1485,7 +1481,7 @@ function viewCreate() {
           items
             .map(
               (it) => `
-          <div class=\"card\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0, 6)})</small></div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <a class=\"btn secondary\" href=\"#/study\" onclick=\"window.CLQ_setArticleFromQa('${it.articleId || ''}','${it.id}')\">この問題で出題</a>\n              <button class=\"btn\" onclick=\"window.CLQ_editQa('${it.id}')\">編集</button>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`,
+          <div class=\"card\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0, 6)})</small></div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <button class=\"btn\" onclick=\"window.CLQ_editQa('${it.id}')\">編集</button>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`,
             )
             .join('') || '<div class="muted">（該当なし）</div>';
       } catch (err) {
