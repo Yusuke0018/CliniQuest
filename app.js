@@ -1187,6 +1187,92 @@ async function setupArticles() {
   const search = qs('#artSearch');
   let selectedTag = '';
   let tagsEl = qs('#artTags') || null;
+  // グラフ表示のUIとオーバーレイ（SVG）を動的に用意
+  let graphOn = false;
+  function ensureGraphUi() {
+    const panel = qs('#app .window');
+    if (panel && !qs('#toggleArtGraph')) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.style.marginTop = '.5rem';
+      row.style.gap = '.5rem';
+      row.innerHTML = '<button id="toggleArtGraph" class="btn secondary">グラフ表示</button>';
+      const searchPane = qs('#artSearchPane');
+      if (searchPane) panel.insertBefore(row, searchPane);
+      else panel.appendChild(row);
+      row.querySelector('#toggleArtGraph')?.addEventListener('click', () => {
+        graphOn = !graphOn;
+        const btn = qs('#toggleArtGraph');
+        if (btn) btn.textContent = graphOn ? 'グラフ非表示' : 'グラフ表示';
+        drawGraph(lastItems);
+      });
+    }
+    const list = qs('#artList');
+    if (list && !qs('#artGridWrap')) {
+      const wrap = document.createElement('div');
+      wrap.id = 'artGridWrap';
+      wrap.className = 'art-grid-wrap';
+      wrap.style.position = 'relative';
+      const svgNS = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(svgNS, 'svg');
+      svg.setAttribute('id', 'artGraph');
+      svg.setAttribute('class', 'art-graph');
+      svg.setAttribute(
+        'style',
+        'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;',
+      );
+      list.parentNode.insertBefore(wrap, list);
+      wrap.appendChild(svg);
+      wrap.appendChild(list);
+      window.addEventListener('resize', () => drawGraph(lastItems));
+    }
+  }
+  ensureGraphUi();
+  let lastItems = [];
+  function drawGraph(items) {
+    const wrap = qs('#artGridWrap');
+    const graph = qs('#artGraph');
+    if (!wrap || !graph) return;
+    if (!graphOn) {
+      graph.innerHTML = '';
+      return;
+    }
+    try {
+      const wrapRect = wrap.getBoundingClientRect();
+      const idBySlug = new Map(items.map((it) => [it.slug, it.id]));
+      const links = [];
+      const linkRe = /\[\[([^\]]+)\]\]/g;
+      for (const it of items) {
+        const body = it.body || '';
+        let m;
+        while ((m = linkRe.exec(body))) {
+          const toSlug = slugify(m[1] || '');
+          const toId = idBySlug.get(toSlug);
+          if (toId && toId !== it.id) links.push([it.id, toId]);
+        }
+      }
+      const nodes = new Map();
+      wrap.querySelectorAll('[data-article-id]')?.forEach((el) => {
+        const id = el.getAttribute('data-article-id');
+        const r = el.getBoundingClientRect();
+        const x = r.left - wrapRect.left + r.width / 2;
+        const y = r.top - wrapRect.top + r.height / 2;
+        nodes.set(id, { x, y });
+      });
+      const parts = [
+        '<defs><marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#93c5fd"/></marker></defs>',
+      ];
+      for (const [a, b] of links) {
+        const na = nodes.get(a),
+          nb = nodes.get(b);
+        if (!na || !nb) continue;
+        parts.push(
+          `<line x1="${na.x}" y1="${na.y}" x2="${nb.x}" y2="${nb.y}" stroke="#93c5fd" stroke-width="2" marker-end="url(#arrow)" opacity="0.7" />`,
+        );
+      }
+      graph.innerHTML = parts.join('');
+    } catch {}
+  }
   if (!tagsEl) {
     const pane = qs('#artSearchPane');
     if (pane) {
@@ -1254,6 +1340,16 @@ async function setupArticles() {
       </div>`,
       )
       .join('');
+    try {
+      const cards = Array.from(listEl.querySelectorAll('.card'));
+      cards.forEach((el, i) => {
+        const id = filtered[i]?.id || '';
+        if (id) el.setAttribute('data-article-id', id);
+      });
+    } catch {}
+    lastItems = filtered;
+    ensureGraphUi();
+    setTimeout(() => drawGraph(filtered), 0);
   }
   window.CLQ_setArticle = (id) => {
     state.session.filters.articleId = id;
