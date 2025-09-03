@@ -591,17 +591,37 @@ async function createQaAndAward(q, a, r, tagsCsv, articleIdArg = null) {
     if (!qaSnap.exists()) throw new Error('QA not found');
     const qa = qaSnap.data();
     if (qa.createdXpAwarded) return;
-    const userSnap = await tx.get(userRef);
-    if (!userSnap.exists()) throw new Error('user not found');
-    const u = userSnap.data();
+    let userSnap = await tx.get(userRef);
+    let u = userSnap.exists() ? userSnap.data() : null;
+    if (!u) {
+      const seedInit = seedFromUid(uid);
+      const init = {
+        displayName: null,
+        seed: seedInit,
+        level: 1,
+        totalXp: 0,
+        totalCorrect: 0,
+        totalCreated: 0,
+        stats: { knowledge: 0, judgment: 0, skill: 0, empathy: 0 },
+        streak: { current: 0, best: 0, lastActiveYmd: null },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      tx.set(userRef, init);
+      u = init;
+    }
     const addXp = 5;
     const prevXp = u.totalXp || 0;
     const prevLevel = u.level || 1;
     const newXp = prevXp + addXp;
     const newLevel = computeLevel(newXp);
-    const inc = newLevel > prevLevel ? computeLevelUpIncrements(u.seed, prevLevel, newLevel) : null;
+    const seed = u.seed ?? seedFromUid(uid);
+    const inc = newLevel > prevLevel ? computeLevelUpIncrements(seed, prevLevel, newLevel) : null;
     const todayYmd = getJstYmd();
-    const newStreak = nextStreak(u.streak || { current: 0, best: 0, lastActiveYmd: null }, todayYmd);
+    const newStreak = nextStreak(
+      u.streak || { current: 0, best: 0, lastActiveYmd: null },
+      todayYmd,
+    );
     // 日次ログは読み取らずにインクリメントで更新
     const ldRef = logsDailyDocRef(uid, todayYmd);
     const patch = {
@@ -696,7 +716,9 @@ async function awardXp(addXp) {
   if (!uid || !addXp) return;
   const userRef = doc(fb.db, 'users', uid);
   // Ensure the user document exists
-  try { await ensureUserInitialized(); } catch {}
+  try {
+    await ensureUserInitialized();
+  } catch {}
   try {
     await runTransaction(fb.db, async (tx) => {
       const snap = await tx.get(userRef);
@@ -708,7 +730,8 @@ async function awardXp(addXp) {
       const prevLevel = u.level || 1;
       const newXp = prevXp + addXp;
       const newLevel = computeLevel(newXp);
-      const inc = newLevel > prevLevel ? computeLevelUpIncrements(u.seed, prevLevel, newLevel) : null;
+      const seed = u.seed ?? seedFromUid(uid);
+      const inc = newLevel > prevLevel ? computeLevelUpIncrements(seed, prevLevel, newLevel) : null;
       const newStreak = nextStreak(u.streak || { current: 0, best: 0, lastActiveYmd: null }, today);
       const patch = {
         totalXp: newXp,
@@ -1108,7 +1131,11 @@ function viewArticle() {
             updatedAt: serverTimestamp(),
           });
           // 記事保存時に +5XP（共通ロジック）
-          try { await awardXp(5); } catch (e2) { console.warn('記事保存時のXP付与に失敗（継続）', e2); }
+          try {
+            await awardXp(5);
+          } catch (e2) {
+            console.warn('記事保存時のXP付与に失敗（継続）', e2);
+          }
           // 再描画
           showToast && showToast('記事を保存しました: +5XP');
           location.hash = `#/article?slug=${encodeURIComponent(article.slug)}`;
@@ -1197,7 +1224,7 @@ function viewCreate() {
         try {
           const { doc, getDoc } = fb.fs;
           const snap = await getDoc(doc(fb.db, 'articles', id0));
-          const t = snap.exists() ? (snap.data().title || id0) : id0;
+          const t = snap.exists() ? snap.data().title || id0 : id0;
           selectedNameEl.textContent = t;
           form.dataset.articleId = id0;
         } catch {}
@@ -1221,7 +1248,8 @@ function viewCreate() {
         .map((d) => ({ id: d.id, ...d.data() }))
         .filter((it) =>
           term
-            ? (it.title || '').toLowerCase().includes(term) || (it.body || '').toLowerCase().includes(term)
+            ? (it.title || '').toLowerCase().includes(term) ||
+              (it.body || '').toLowerCase().includes(term)
             : true,
         )
         .slice(0, 200);
@@ -1230,7 +1258,7 @@ function viewCreate() {
           .map(
             (it) => `
         <div class="card">
-          <div><b>${it.title}</b> <small class="muted">(${it.id.slice(0,6)})</small></div>
+          <div><b>${it.title}</b> <small class="muted">(${it.id.slice(0, 6)})</small></div>
           <div class="muted" style="margin:.25rem 0;">${(it.body || '').slice(0, 80)}</div>
           <div class="row">
             <button type="button" class="btn" data-pick="${it.id}" data-title="${it.title}">この記事を紐づけ</button>
@@ -1334,16 +1362,17 @@ function viewCreate() {
               (it.rationale || '').toLowerCase().includes(term),
           );
         items.sort((a, b) => {
-          const ta = (a.createdAt && a.createdAt.toMillis) ? a.createdAt.toMillis() : 0;
-          const tb = (b.createdAt && b.createdAt.toMillis) ? b.createdAt.toMillis() : 0;
+          const ta = a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : 0;
+          const tb = b.createdAt && b.createdAt.toMillis ? b.createdAt.toMillis() : 0;
           return tb - ta;
         });
-        listEl.innerHTML = items
-          .map(
-            (it) => `
-          <div class=\"card\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0,6)})</small></div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <a class=\"btn secondary\" href=\"#/study\" onclick=\"window.CLQ_setArticleFromQa('${it.articleId || ''}')\">この記事で出題</a>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`,
-          )
-          .join('') || '<div class="muted">（該当なし）</div>';
+        listEl.innerHTML =
+          items
+            .map(
+              (it) => `
+          <div class=\"card\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0, 6)})</small></div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <a class=\"btn secondary\" href=\"#/study\" onclick=\"window.CLQ_setArticleFromQa('${it.articleId || ''}')\">この記事で出題</a>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`,
+            )
+            .join('') || '<div class="muted">（該当なし）</div>';
       } catch (err) {
         console.error('QA一覧の取得に失敗', err);
         listEl.innerHTML = '<div class="muted">読み込みに失敗しました</div>';
@@ -1382,9 +1411,10 @@ async function fetchRandomQa() {
     const minDays = Number(filters.ageDays || 0);
     docs = docs.filter((d) => {
       const v = d.data();
-      const ts = (v.srs?.lastReviewedAt && v.srs.lastReviewedAt.toDate
-        ? v.srs.lastReviewedAt.toDate()
-        : null) || (v.createdAt && v.createdAt.toDate ? v.createdAt.toDate() : null);
+      const ts =
+        (v.srs?.lastReviewedAt && v.srs.lastReviewedAt.toDate
+          ? v.srs.lastReviewedAt.toDate()
+          : null) || (v.createdAt && v.createdAt.toDate ? v.createdAt.toDate() : null);
       const baseYmd = ts ? getJstYmd(ts) : today;
       const diff = ymdDiff(today, baseYmd);
       return diff >= minDays; // 最終学習/作成からの経過日数
@@ -1480,14 +1510,12 @@ function viewSummary() {
     const el = qs('#sumTable');
     try {
       const snap = await getDocs(
-        query(
-          collection(fb.db, 'users', uid, 'logs_daily'),
-          orderBy('ymd', 'desc'),
-          limit(14),
-        ),
+        query(collection(fb.db, 'users', uid, 'logs_daily'), orderBy('ymd', 'desc'), limit(14)),
       );
       const items = snap.docs.map((d) => d.data());
-      el.innerHTML = items.length ? renderRows(items) : '<div class="muted">記録がありません。</div>';
+      el.innerHTML = items.length
+        ? renderRows(items)
+        : '<div class="muted">記録がありません。</div>';
     } catch (e) {
       try {
         const today = getJstYmd();
@@ -1497,13 +1525,17 @@ function viewSummary() {
           return getJstYmd(d);
         });
         const snaps = await Promise.all(
-          ymList.map((ymd) => getDoc(doc(fb.db, 'users', uid, 'logs_daily', ymd)).catch(() => null)),
+          ymList.map((ymd) =>
+            getDoc(doc(fb.db, 'users', uid, 'logs_daily', ymd)).catch(() => null),
+          ),
         );
         const items = snaps
           .filter((s) => s && s.exists())
           .map((s) => s.data())
           .sort((a, b) => (a.ymd < b.ymd ? 1 : -1));
-        el.innerHTML = items.length ? renderRows(items) : '<div class="muted">記録がありません。</div>';
+        el.innerHTML = items.length
+          ? renderRows(items)
+          : '<div class="muted">記録がありません。</div>';
       } catch (e2) {
         el.textContent = '記録がありません。';
       }
