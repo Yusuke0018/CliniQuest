@@ -241,6 +241,23 @@ select:focus {
   color: var(--muted);
 }
 
+/* Tag chips */
+.tagchip {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: #fafafa;
+  cursor: pointer;
+}
+.tagchip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: #eef2ff;
+}
+
 /* 記事タイトルのリンク色（ライト/ダークで黄色系） */
 .article-title {
   color: #d4a017;

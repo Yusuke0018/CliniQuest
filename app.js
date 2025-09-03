@@ -1185,19 +1185,60 @@ async function setupArticles() {
   const listEl = qs('#artList');
   const form = qs('#artForm');
   const search = qs('#artSearch');
+  let selectedTag = '';
+  let tagsEl = qs('#artTags') || null;
+  if (!tagsEl) {
+    const pane = qs('#artSearchPane');
+    if (pane) {
+      tagsEl = document.createElement('div');
+      tagsEl.id = 'artTags';
+      tagsEl.className = 'row';
+      tagsEl.style.gap = '.35rem';
+      tagsEl.style.flexWrap = 'wrap';
+      pane.appendChild(tagsEl);
+    }
+  }
   async function refresh() {
     const uidNow = fb.user?.uid;
     if (!uidNow) return;
     const snap = await getDocs(query(collection(fb.db, 'articles'), where('uid', '==', uidNow)));
     const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     const term = (search?.value || '').trim().toLowerCase();
+    // Tag cloud + filter
+    try {
+      const tags = new Map();
+      for (const it of items) (it.tags || []).forEach((t) => tags.set(t, (tags.get(t) || 0) + 1));
+      if (tagsEl) {
+        tagsEl.innerHTML =
+          (selectedTag
+            ? `<span class=\"tagchip active\" data-tag=\"\">#${selectedTag} ×</span>`
+            : '') +
+          Array.from(tags.entries())
+            .sort((a, b) => b[1] - a[1])
+            .map(
+              ([t, n]) =>
+                `<span class=\"tagchip\" data-tag=\"${t}\">#${t} <small class=\"muted\">(${n})</small></span>`,
+            )
+            .join(' ');
+        Array.from(tagsEl.querySelectorAll('.tagchip')).forEach((el) =>
+          el.addEventListener('click', () => {
+            const t = el.getAttribute('data-tag');
+            selectedTag = t || '';
+            refresh();
+          }),
+        );
+      }
+    } catch {}
+    const byTag = selectedTag
+      ? items.filter((it) => Array.isArray(it.tags) && it.tags.includes(selectedTag))
+      : items;
     const filtered = term
       ? items.filter(
           (it) =>
             (it.title || '').toLowerCase().includes(term) ||
             (it.body || '').toLowerCase().includes(term),
         )
-      : items;
+      : byTag;
     listEl.innerHTML = filtered
       .map(
         (it) => `
@@ -1373,6 +1414,7 @@ function viewArticle() {
             <label>本文（Markdown）</label>
             <textarea id="editBody" rows="10">${article.body || ''}</textarea>
           </div>
+          <div class="field"><label>タグ（カンマ区切り）</label><input id="editTags" value="${(article.tags || []).join(', ')}"/></div>
           <div class="row"><button id="saveArticle" class="btn">保存</button></div>
         </details>
         <div class="card" style="margin-top:.5rem;">
@@ -1405,9 +1447,14 @@ function viewArticle() {
       saveBtn?.addEventListener('click', async () => {
         try {
           const body = qs('#editBody', wrap).value;
+          const tagsv = (qs('#editTags', wrap)?.value || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
           const { doc, updateDoc, serverTimestamp, runTransaction } = fb.fs;
           await updateDoc(doc(fb.db, 'articles', article.id), {
             body,
+            tags: tagsv,
             updatedAt: serverTimestamp(),
           });
           // 記事保存時に +5XP（共通ロジック）
