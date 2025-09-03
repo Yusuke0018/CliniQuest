@@ -209,11 +209,12 @@ let fb = {
 
 // ---- ゲーム定数・状態 ----
 const LEVEL_SIZE = 80;
+// ステ振りテンプレート（1レベル当たり合計10になるよう調整）
 const SETS = [
-  [5, 3, 2, 1],
-  [5, 4, 2, 1],
-  [5, 4, 3, 1],
-  [5, 4, 3, 2],
+  [4, 3, 2, 1], // 合計10
+  [4, 4, 1, 1], // 合計10
+  [5, 3, 1, 1], // 合計10
+  [3, 3, 3, 1], // 合計10
 ];
 const PERMS = (() => {
   const base = [0, 1, 2, 3];
@@ -451,6 +452,7 @@ async function initFirebase() {
     }
     fb.user = user;
     await ensureUserInitialized();
+    await ensureBaseStatsApplied();
     subscribeUserDoc();
     render();
   });
@@ -472,12 +474,42 @@ async function ensureUserInitialized() {
       totalXp: 0,
       totalCorrect: 0,
       totalCreated: 0,
-      stats: { knowledge: 0, judgment: 0, skill: 0, empathy: 0 },
+      // LV1 から素のステータスを付与
+      stats: { knowledge: 5, judgment: 5, skill: 5, empathy: 5 },
+      statsBaseVersion: 2,
       streak: { current: 0, best: 0, lastActiveYmd: null },
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
   }
+}
+
+// 既存ユーザー向け: 基礎ステータスを未適用なら付与
+async function ensureBaseStatsApplied() {
+  const { doc, getDoc, updateDoc, serverTimestamp, runTransaction } = fb.fs;
+  const uid = fb.user?.uid;
+  if (!uid) return;
+  const ref = doc(fb.db, 'users', uid);
+  try {
+    await runTransaction(fb.db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return;
+      const u = snap.data();
+      if (u.statsBaseVersion >= 2) return; // 既に適用済み
+      const s = u.stats || { knowledge: 0, judgment: 0, skill: 0, empathy: 0 };
+      const patch = {
+        stats: {
+          knowledge: (s.knowledge || 0) + 5,
+          judgment: (s.judgment || 0) + 5,
+          skill: (s.skill || 0) + 5,
+          empathy: (s.empathy || 0) + 5,
+        },
+        statsBaseVersion: 2,
+        updatedAt: serverTimestamp(),
+      };
+      tx.update(ref, patch);
+    });
+  } catch {}
 }
 
 function subscribeUserDoc() {
