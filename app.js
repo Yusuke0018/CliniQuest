@@ -564,6 +564,50 @@ function logsDailyDocRef(uid, ymd) {
   return doc(fb.db, 'users', uid, 'logs_daily', ymd);
 }
 
+// カレンダーピッカー（date input）で日付(YYYYMMDD)を選ばせるモーダル
+function chooseNextDueYmdDialog(initialYmd) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText =
+      'position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999;';
+    const card = document.createElement('div');
+    card.className = 'window';
+    card.style.maxWidth = '420px';
+    const initStr =
+      initialYmd && /^\d{8}$/.test(initialYmd)
+        ? `${initialYmd.slice(0, 4)}-${initialYmd.slice(4, 6)}-${initialYmd.slice(6, 8)}`
+        : '';
+    card.innerHTML = `
+      <h2 class="title">次回復習タイミング</h2>
+      <div class="grid">
+        <div class="field"><label>日付</label><input id="duePicker" type="date" value="${initStr}"/></div>
+        <div class="row" style="justify-content:flex-end;gap:.5rem;">
+          <button class="btn secondary" id="cancelPick">キャンセル</button>
+          <button class="btn" id="okPick">保存</button>
+        </div>
+      </div>
+    `;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    const cleanup = (val) => {
+      try {
+        document.body.removeChild(overlay);
+      } catch {}
+      resolve(val);
+    };
+    card.querySelector('#cancelPick').addEventListener('click', () => cleanup(null));
+    card.querySelector('#okPick').addEventListener('click', () => {
+      const v = card.querySelector('#duePicker').value;
+      if (!v) return cleanup(null);
+      const ymd = v.replace(/-/g, '');
+      cleanup(ymd);
+    });
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) cleanup(null);
+    });
+  });
+}
+
 // 今日の復習数を数える（期日到来 or nextDueYmd 未設定）
 async function countDueToday(limitN = 500) {
   if (!fb.fs) return 0;
@@ -619,6 +663,94 @@ async function updateQaSrs(qaId, isCorrect) {
     tx.update(ref, {
       srs: { reps, ease, interval, nextDueYmd: nextDue, lastReviewedAt: serverTimestamp() },
       updatedAt: serverTimestamp(),
+    });
+  });
+}
+
+// 問題編集用のモーダル（問/答え/解説/タグ/次の期日）
+async function openQaEditDialog(qaId) {
+  const { doc, getDoc, updateDoc, serverTimestamp } = fb.fs;
+  const uid = fb.user?.uid;
+  if (!uid) return alert('未サインインです');
+  const ref = doc(fb.db, 'qas', qaId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return alert('問題が見つかりません');
+  const v = snap.data();
+  const q0 = v.question || '';
+  const a0 = v.answer || '';
+  const r0 = v.rationale || '';
+  const t0 = (v.tags || []).join(', ');
+  const d0 = v.srs?.nextDueYmd
+    ? `${v.srs.nextDueYmd.slice(0, 4)}-${v.srs.nextDueYmd.slice(4, 6)}-${v.srs.nextDueYmd.slice(6, 8)}`
+    : '';
+
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText =
+      'position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999;';
+    const card = document.createElement('div');
+    card.className = 'window';
+    card.style.maxWidth = '680px';
+    card.innerHTML = `
+      <h2 class="title">問題を編集</h2>
+      <form id="qaEditForm" class="grid">
+        <div class="field"><label>問題（Q）</label><textarea id="editQ" rows="3">${q0.replace(/</g, '&lt;')}</textarea></div>
+        <div class="field"><label>答え（A）</label><textarea id="editA" rows="3">${a0.replace(/</g, '&lt;')}</textarea></div>
+        <div class="field"><label>解説（任意）</label><textarea id="editR" rows="3">${r0.replace(/</g, '&lt;')}</textarea></div>
+        <div class="field"><label>タグ（カンマ区切り）</label><input id="editTags" value="${t0.replace(/"/g, '&quot;')}"/></div>
+        <div class="field"><label>次の期日</label><input id="editDue" type="date" value="${d0}"/></div>
+        <div class="row" style="justify-content:flex-end;gap:.5rem;">
+          <button class="btn secondary" type="button" id="qaCancel">キャンセル</button>
+          <button class="btn" type="submit">保存</button>
+        </div>
+      </form>
+    `;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    const cleanup = (ok = false) => {
+      try {
+        document.body.removeChild(overlay);
+      } catch {}
+      resolve(ok);
+    };
+    card.querySelector('#qaCancel').addEventListener('click', () => cleanup(false));
+    card.querySelector('#qaEditForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const q1 = card.querySelector('#editQ').value.trim();
+        const a1 = card.querySelector('#editA').value.trim();
+        const r1 = card.querySelector('#editR').value.trim();
+        const t1 = card.querySelector('#editTags').value;
+        const d1 = card.querySelector('#editDue').value; // yyyy-mm-dd
+        if (!q1 || !a1) return alert('Q と A は必須です');
+        const tags = (t1 || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => s.length);
+        const patch = {
+          question: q1,
+          answer: a1,
+          rationale: r1 || null,
+          tags,
+          updatedAt: serverTimestamp(),
+        };
+        if (d1 && /^\d{4}-\d{2}-\d{2}$/.test(d1)) {
+          const ymd = d1.replace(/-/g, '');
+          const today = getJstYmd();
+          const cur = v.srs || { reps: 0, ease: 2.5, interval: 0 };
+          const pickedInterval = Math.max(0, ymdDiff(ymd, today));
+          patch.srs = { ...cur, nextDueYmd: ymd, interval: pickedInterval };
+        }
+        await updateDoc(ref, patch);
+        showToast && showToast('問題を更新しました');
+        cleanup(true);
+      } catch (err) {
+        console.error(err);
+        alert('更新に失敗しました: ' + (err?.message || err));
+      }
+    });
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) cleanup(false);
     });
   });
 }
@@ -1403,52 +1535,8 @@ function viewCreate() {
     };
     // 「この問題で出題」は不要のため機能を提供しません
     window.CLQ_editQa = async (id) => {
-      try {
-        const { doc, getDoc, updateDoc, serverTimestamp } = fb.fs;
-        const ref = doc(fb.db, 'qas', id);
-        const snap = await getDoc(ref);
-        if (!snap.exists()) return alert('問題が見つかりません');
-        const v = snap.data();
-        const q0 = v.question || '';
-        const a0 = v.answer || '';
-        const r0 = v.rationale || '';
-        const t0 = (v.tags || []).join(', ');
-        const d0 = v.srs?.nextDueYmd
-          ? `${v.srs.nextDueYmd.slice(0, 4)}-${v.srs.nextDueYmd.slice(4, 6)}-${v.srs.nextDueYmd.slice(6, 8)}`
-          : '';
-        const q1 = prompt('問題（Q）', q0);
-        if (q1 == null) return; // cancel
-        const a1 = prompt('答え（A）', a0);
-        if (a1 == null) return;
-        const r1 = prompt('解説（任意）', r0);
-        if (r1 == null) return;
-        const t1 = prompt('タグ（カンマ区切り・任意）', t0);
-        if (t1 == null) return;
-        const d1 = prompt('次の期日（YYYY-MM-DD、省略可）', d0);
-        if (d1 == null) return;
-        const tags = (t1 || '')
-          .split(',')
-          .map((s) => s.trim())
-          .filter((s) => s.length);
-        const patch = {
-          question: (q1 || '').trim(),
-          answer: (a1 || '').trim(),
-          rationale: (r1 || '').trim() || null,
-          tags,
-          updatedAt: serverTimestamp(),
-        };
-        if (d1 && /^\d{4}-\d{2}-\d{2}$/.test(d1)) {
-          const ymd = d1.replace(/-/g, '');
-          const cur = v.srs || { reps: 0, ease: 2.5, interval: 0 };
-          patch.srs = { ...cur, nextDueYmd: ymd };
-        }
-        await updateDoc(ref, patch);
-        showToast && showToast('問題を更新しました');
-        refreshQaList();
-      } catch (e) {
-        console.error(e);
-        alert('更新に失敗しました: ' + (e?.message || e));
-      }
+      const ok = await openQaEditDialog(id);
+      if (ok) refreshQaList();
     };
     async function refreshQaList() {
       const uid = fb.user?.uid;
@@ -1775,9 +1863,49 @@ function setupStudy() {
   ok.onclick = async () => {
     try {
       const { isCritical, gain, leveledUp } = await awardCorrectXpAndUpdate(1);
-      // SRS 更新（正解）
+      // SRS 更新（正解）: 次回復習タイミングをカレンダーで指定可能
       const lastId = state.session.history[state.session.history.length - 1];
-      if (lastId) await updateQaSrs(lastId, true);
+      if (lastId) {
+        try {
+          const { doc, getDoc, updateDoc, serverTimestamp } = fb.fs;
+          const ref = doc(fb.db, 'qas', lastId);
+          const snap = await getDoc(ref);
+          if (snap.exists()) {
+            const v = snap.data();
+            const today = getJstYmd();
+            const cur = v.srs || { reps: 0, ease: 2.5, interval: 0 };
+            // 自動提案（SM-2風）
+            let reps = (cur.reps || 0) + 1;
+            let ease = typeof cur.ease === 'number' ? cur.ease : 2.5;
+            ease = Math.max(1.3, Math.round((ease + 0.02) * 100) / 100);
+            let interval;
+            if (reps === 1) interval = 1;
+            else if (reps === 2) interval = 3;
+            else interval = Math.max(1, Math.round((cur.interval || 1) * ease));
+            const suggested = addDaysToYmd(today, interval);
+            const picked = await chooseNextDueYmdDialog(suggested);
+            if (picked) {
+              const pickedInterval = Math.max(0, ymdDiff(picked, today));
+              await updateDoc(ref, {
+                srs: {
+                  reps,
+                  ease,
+                  interval: pickedInterval,
+                  nextDueYmd: picked,
+                  lastReviewedAt: serverTimestamp(),
+                },
+                updatedAt: serverTimestamp(),
+              });
+            } else {
+              // キャンセル時は自動で更新
+              await updateQaSrs(lastId, true);
+            }
+          }
+        } catch (e2) {
+          console.warn('次回復習タイミングの入力に失敗（自動へフォールバック）', e2);
+          await updateQaSrs(lastId, true);
+        }
+      }
       const line1 = isCritical
         ? `<span class="crit">✨ 会心のいちげき！ ✨／けいけんちを ${gain} かくとく！</span>`
         : `<span>正解だった！／けいけんちを ${gain} かくとく！</span>`;
