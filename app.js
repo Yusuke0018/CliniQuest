@@ -1600,7 +1600,18 @@ async function setupArticles() {
         })
         .catch((e2) => console.warn('記事作成時のフラグ更新に失敗（継続）', e2));
       try {
+        const uBefore = state.userDoc || { level: 1, totalXp: 0 };
+        const prevLevel = uBefore.level || 1;
+        const prevXp = uBefore.totalXp || 0;
         await awardXp(5);
+        const newLevel = computeLevel(prevXp + 5);
+        if (newLevel > prevLevel) {
+          try {
+            const seed = uBefore.seed ?? (fb.user?.uid ? seedFromUid(fb.user.uid) : 0);
+            const inc = computeLevelUpIncrements(seed, prevLevel, newLevel);
+            showLevelUpEffect({ prevLevel, newLevel, inc });
+          } catch (e4) { console.warn('levelup effect error (create)', e4); }
+        }
       } catch (e3) {
         console.warn('記事作成時のXP付与に失敗', e3);
       }
@@ -1857,10 +1868,19 @@ function viewArticle() {
           ]);
           // 記事保存時に +5XP（共通ロジック）
           try {
+            const uBefore = state.userDoc || { level: 1, totalXp: 0 };
+            const prevLevel = uBefore.level || 1;
+            const prevXp = uBefore.totalXp || 0;
             await awardXp(5);
-          } catch (e2) {
-            console.warn('記事保存時のXP付与に失敗（継続）', e2);
-          }
+            const newLevel = computeLevel(prevXp + 5);
+            if (newLevel > prevLevel) {
+              try {
+                const seed = uBefore.seed ?? (fb.user?.uid ? seedFromUid(fb.user.uid) : 0);
+                const inc = computeLevelUpIncrements(seed, prevLevel, newLevel);
+                showLevelUpEffect({ prevLevel, newLevel, inc });
+              } catch (e3) { console.warn('levelup effect error (save)', e3); }
+            }
+          } catch (e2) { console.warn('記事保存時のXP付与に失敗（継続）', e2); }
           // 再描画
           showToast && showToast('記事を保存しました: +5XP');
           location.hash = `#/article?slug=${encodeURIComponent(article.slug)}`;
@@ -2389,7 +2409,9 @@ function setupStudy() {
   );
   ok.onclick = async () => {
     try {
-      const { isCritical, gain, leveledUp } = await awardCorrectXpAndUpdate(1);
+      const uBefore = state.userDoc || { level: 1, totalXp: 0, stats: { knowledge: 0, judgment: 0, skill: 0, empathy: 0 } };
+      const prevLevel = uBefore.level || 1;
+      const { isCritical, gain, leveledUp, levelAfter } = await awardCorrectXpAndUpdate(1);
       // SRS 更新（正解）: 次回復習タイミングをカレンダーで指定可能
       const lastId = state.session.history[state.session.history.length - 1];
       if (lastId) {
@@ -2437,6 +2459,13 @@ function setupStudy() {
       const line1 = isCritical
         ? `<span class="crit">✨ 会心のいちげき！ ✨／けいけんちを ${gain} かくとく！</span>`
         : `<span>正解だった！／けいけんちを ${gain} かくとく！</span>`;
+      if (leveledUp) {
+        try {
+          const seed = uBefore.seed ?? (fb.user?.uid ? seedFromUid(fb.user.uid) : 0);
+          const inc = computeLevelUpIncrements(seed, prevLevel, levelAfter);
+          showLevelUpEffect({ prevLevel, newLevel: levelAfter, inc });
+        } catch (e2) { console.warn('levelup effect error (study)', e2); }
+      }
       const line2 = leveledUp ? `<div>レベルが あがった！</div>` : '';
       log.innerHTML = line1 + line2;
     } catch (e) {
@@ -2631,4 +2660,139 @@ function showToast(msg, ms = 2000) {
   setTimeout(() => {
     el.remove();
   }, ms);
+}
+
+// -------- Level Up Effect --------
+function showLevelUpEffect({ prevLevel, newLevel, inc }) {
+  try {
+    // Overlay（フラッシュ演出付き）
+    const overlay = document.createElement('div');
+    overlay.className = 'levelup-overlay flash';
+
+    // 背景リング（DQ風）
+    for (let i = 0; i < 3; i++) {
+      const r = document.createElement('div');
+      r.className = 'ring ring' + (i + 1);
+      r.style.setProperty('--ring-delay', (i * 0.18).toFixed(2) + 's');
+      overlay.appendChild(r);
+    }
+
+    // カード
+    const card = document.createElement('div');
+    card.className = 'levelup-card';
+    const name = (state.userDoc?.displayName || 'ゆうすけ').toString();
+    const title = levelTitle(newLevel);
+    const statName = { knowledge: 'ちりょく', judgment: 'はんだんりょく', skill: 'ぎじゅつ', empathy: 'きょうかんりょく' };
+
+    const plainLines = [];
+    const finalHtmlLines = [];
+    plainLines.push(`${name}は レベルが あがった！`);
+    finalHtmlLines.push(`<div class="lvh lvbanner">${name}は レベルが あがった！</div>`);
+    plainLines.push(`（${prevLevel} → ${newLevel}）`);
+    finalHtmlLines.push(`<div class="lvline">（${prevLevel} → <b>${newLevel}</b>）</div>`);
+    if (title && title !== '-') {
+      plainLines.push(`『${title}』の称号を 手に入れた！`);
+      finalHtmlLines.push(`<div class="lvline lvtitle">『${title}』の称号を 手に入れた！</div>`);
+    }
+    const incParts = [];
+    if (inc && typeof inc === 'object') {
+      for (const k of ['knowledge', 'judgment', 'skill', 'empathy']) {
+        const v = Number(inc[k] || 0);
+        if (v > 0) incParts.push(`${statName[k]}が +${v} あがった！`);
+      }
+    }
+    if (incParts.length) {
+      for (const s of incParts) {
+        plainLines.push(s);
+        finalHtmlLines.push(`<div class="lvline lvstats">${s}</div>`);
+      }
+    }
+
+    const list = document.createElement('div');
+    list.className = 'lvlines';
+    card.appendChild(list);
+    overlay.appendChild(card);
+
+    // 紙吹雪（強化）
+    const colors = ['#ffd55e', '#6ee7a2', '#93c5fd', '#fca5a5', '#fcd34d', '#a78bfa'];
+    const pieces = Math.min(72, Math.max(28, 48));
+    for (let i = 0; i < pieces; i++) {
+      const c = document.createElement('div');
+      c.className = 'confetti';
+      c.style.left = Math.round(Math.random() * 100) + 'vw';
+      c.style.background = colors[Math.floor(Math.random() * colors.length)];
+      c.style.setProperty('--dur', (2.2 + Math.random() * 1.6).toFixed(2) + 's');
+      c.style.setProperty('--delay', (Math.random() * 0.8).toFixed(2) + 's');
+      c.style.setProperty('--dx', (Math.random() * 80 - 40).toFixed(0) + 'vw');
+      overlay.appendChild(c);
+    }
+
+    document.body.appendChild(overlay);
+
+    // タイプライタ表示
+    let skipNow = false;
+    let typing = true;
+    let totalMs = 0;
+    let audioCtx = null;
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
+    const beep = () => {
+      try {
+        if (!audioCtx) return;
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.type = 'square';
+        o.frequency.value = 920 + Math.random() * 40;
+        g.gain.value = 0.02;
+        o.connect(g); g.connect(audioCtx.destination);
+        o.start(); o.stop(audioCtx.currentTime + 0.05);
+      } catch {}
+    };
+    const typeLine = (text, klass = '') => new Promise((resolve) => {
+      const el = document.createElement('div');
+      el.className = 'lvline ' + klass;
+      list.appendChild(el);
+      let i = 0;
+      const speed = 18;
+      const timer = setInterval(() => {
+        if (skipNow) {
+          clearInterval(timer);
+          el.textContent = text;
+          resolve();
+          return;
+        }
+        el.textContent = text.slice(0, ++i);
+        if (i % 3 === 0) beep();
+        if (i >= text.length) { clearInterval(timer); resolve(); }
+      }, speed);
+    });
+
+    (async () => {
+      for (let idx = 0; idx < plainLines.length; idx++) {
+        const klass = idx === 0 ? 'lvbanner' : (idx === 1 ? '' : (finalHtmlLines[idx]?.includes('lvtitle') ? 'lvtitle' : (finalHtmlLines[idx]?.includes('lvstats') ? 'lvstats' : '')));
+        await typeLine(plainLines[idx], klass);
+        totalMs += Math.max(plainLines[idx].length * 18 + 100, 360);
+      }
+      typing = false;
+      list.innerHTML = finalHtmlLines.join('');
+      const extra = Math.min(3500, Math.max(1600, totalMs * 0.25));
+      setTimeout(() => {
+        if (!overlay.isConnected) return;
+        overlay.classList.add('fade-out');
+        setTimeout(() => overlay.remove(), 500);
+      }, extra);
+    })();
+
+    overlay.addEventListener('click', () => {
+      if (typing) {
+        skipNow = true;
+        typing = false;
+        list.innerHTML = finalHtmlLines.join('');
+        return;
+      }
+      overlay.classList.add('fade-out');
+      setTimeout(() => overlay.remove(), 300);
+    });
+  } catch (e) {
+    console.warn('showLevelUpEffect failed', e);
+  }
 }
