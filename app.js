@@ -365,6 +365,9 @@ async function updateArticleSrsOnRead(articleId, manualYmd = null) {
   const uid = fb.user?.uid;
   if (!uid) throw new Error('未サインイン');
   const ref = doc(fb.db, 'articles', articleId);
+  // レベルアップ検知用に事前スナップショット
+  const uBefore = state.userDoc || { level: 1, totalXp: 0 };
+  const prevLevel = uBefore.level || 1;
   await runTransaction(fb.db, async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists()) throw new Error('Article not found');
@@ -407,6 +410,17 @@ async function updateArticleSrsOnRead(articleId, manualYmd = null) {
   // 記事の復習で +2XP（ベストエフォート）
   try {
     await awardXp(2);
+    // 事前値からの推定レベルアップ判定（UI演出用）
+    const newLevel = computeLevel((uBefore.totalXp || 0) + 2);
+    if (newLevel > prevLevel) {
+      try {
+        const seed = uBefore.seed ?? (fb.user?.uid ? seedFromUid(fb.user.uid) : 0);
+        const inc = computeLevelUpIncrements(seed, prevLevel, newLevel);
+        showLevelUpEffect({ prevLevel, newLevel, inc });
+      } catch (e3) {
+        console.warn('levelup effect error (article review)', e3);
+      }
+    }
   } catch (e) {
     console.warn('award xp on article review failed', e);
   }
