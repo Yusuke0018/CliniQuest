@@ -9,6 +9,11 @@
   --focus: #93c5fd; /* blue-300 */
   --ok: #16a34a; /* green-600 */
   --ng: #dc2626; /* red-600 */
+  /* Review (Today) tint variables */
+  --review-bg: #fff7e6; /* amber-50 */
+  --review-border: #f59e0b; /* amber-500 */
+  --review-summary-bg: #fffbeb; /* amber-50 stronger */
+  --review-text: #7c2d12; /* amber-900 */
 }
 * {
   box-sizing: border-box;
@@ -127,8 +132,24 @@ body.dq-font {
 }
 /* 本日復習（記事）セクションの視認性向上 */
 details.review-pane {
-  background: var(--panel-2);
-  border-left: 4px solid var(--accent);
+  background: var(--review-bg);
+  border: 2px solid var(--review-border);
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+}
+details.review-pane > summary {
+  display: block;
+  margin: -0.75rem -0.75rem 0 -0.75rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--review-summary-bg);
+  border-bottom: 1px solid var(--review-border);
+  border-radius: 6px 6px 0 0;
+  color: var(--review-text);
+  font-weight: 600;
+}
+details.review-pane .card {
+  background: #ffffff;
+  border-color: #f3d08c;
 }
 .grid.cols-2 {
   grid-template-columns: 1fr 1fr;
@@ -572,6 +593,11 @@ select:focus {
   --focus: #4f8cf7;
   --ok: #6ee7a2;
   --ng: #f79393;
+  /* Dark review tints */
+  --review-bg: #2b1f00;
+  --review-border: #ffd55e;
+  --review-summary-bg: #3a2a00;
+  --review-text: #ffe8b0;
 }
 [data-theme='dark'] .topbar {
   background: var(--panel);
@@ -635,6 +661,16 @@ select:focus {
 /* details/summary 可読性 */
 [data-theme='dark'] details summary {
   color: var(--text);
+}
+/* Dark: Review section */
+[data-theme='dark'] details.review-pane {
+  background: var(--review-bg);
+  border-color: var(--review-border);
+}
+[data-theme='dark'] details.review-pane > summary {
+  background: var(--review-summary-bg);
+  border-bottom-color: var(--review-border);
+  color: var(--review-text);
 }
 /* Dark: セクション見出し/復習セクション */
 [data-theme='dark'] .section-head {
