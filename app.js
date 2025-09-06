@@ -2305,17 +2305,23 @@ function viewCreate() {
         .slice(0, 200);
       pickList.innerHTML =
         items
-          .map(
-            (it) => `
-        <div class="card">
-          <div><b>${it.title}</b> <small class="muted">(${it.id.slice(0, 6)})</small></div>
+          .map((it) => {
+            const ymd = it.srs?.nextDueYmd || '';
+            const info = dueInfo(ymd);
+            const dueCls =
+              info.cls === 'overdue' || info.cls === 'today' || info.cls === 'unset'
+                ? 'qa-card qa-due'
+                : '';
+            return `
+        <div class="card ${dueCls}">
+          <div><b>${it.title}</b> <small class="muted">(${it.id.slice(0, 6)})</small> ${dueBadgeHtml(ymd)}</div>
           <div class="muted" style="margin:.25rem 0;">${(it.body || '').slice(0, 80)}</div>
           <div class="row">
             <button type="button" class="btn" data-pick="${it.id}" data-title="${it.title}">この記事を紐づけ</button>
             <a class="btn secondary" href="#/article?slug=${encodeURIComponent(it.slug)}">読む</a>
           </div>
-        </div>`,
-          )
+        </div>`;
+          })
           .join('') || '<div class="muted">（該当なし）</div>';
       // ボタンにイベント付与
       qsa('button[data-pick]', pickList).forEach((btn) => {
