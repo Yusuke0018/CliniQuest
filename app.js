@@ -668,6 +668,25 @@ function addDaysToYmd(ymd, days) {
   return getJstYmd(next);
 }
 
+// 期日表示補助
+function dueInfo(ymd) {
+  if (!ymd || !/^\d{8}$/.test(ymd)) {
+    return { date: '', short: '未設定', cls: 'unset' };
+  }
+  const today = getJstYmd();
+  const d = ymdDiff(ymd, today);
+  const date = `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
+  if (d < 0) return { date, short: `${Math.abs(d)}日遅れ`, cls: 'overdue' };
+  if (d === 0) return { date, short: '今日', cls: 'today' };
+  if (d === 1) return { date, short: '明日', cls: 'future' };
+  return { date, short: `あと${d}日`, cls: 'future' };
+}
+function dueBadgeHtml(ymd) {
+  const info = dueInfo(ymd);
+  const title = info.date || '未設定';
+  return `<span class="due-badge ${info.cls}" title="${title}">${info.short}</span>`;
+}
+
 function nextStreak(streak, todayYmd) {
   const last = streak?.lastActiveYmd || null;
   if (!last) return { current: 1, best: 1, lastActiveYmd: todayYmd };
@@ -1421,14 +1440,9 @@ async function setupArticles() {
         items
           .map((it) => {
             const ymd = it.srs?.nextDueYmd;
-            const dueTxt = !ymd
-              ? '未設定'
-              : ymd <= today
-                ? '本日'
-                : `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
             return `
             <div class="card" data-article-id="${it.id}">
-              <div><b><a class="article-title" href="#/article?slug=${encodeURIComponent(it.slug)}">${it.title}</a></b> <small class="muted">(${it.id.slice(0, 6)})</small> <span class="badge">${dueTxt}</span></div>
+              <div><b><a class="article-title" href="#/article?slug=${encodeURIComponent(it.slug)}">${it.title}</a></b> <small class="muted">(${it.id.slice(0, 6)})</small> ${dueBadgeHtml(ymd)}</div>
               <div class="muted" style="margin:.25rem 0;">${(it.body || '').slice(0, 80)}</div>
               <div class="row">
                 <a class="btn secondary" href="#/article?slug=${encodeURIComponent(it.slug)}">読む</a>
@@ -1686,12 +1700,8 @@ async function setupArticles() {
         const id = it.id || '';
         if (id) el.setAttribute('data-article-id', id);
         const ymd = it.srs?.nextDueYmd;
-        if (ymd) {
-          const dueTxt = ymd <= today ? '本日' : `${ymd.slice(4, 6)}/${ymd.slice(6, 8)}`;
-          const header = el.querySelector('div');
-          if (header)
-            header.insertAdjacentHTML('beforeend', ` <span class="badge">${dueTxt}</span>`);
-        }
+        const header = el.querySelector('div');
+        if (header) header.insertAdjacentHTML('beforeend', ' ' + dueBadgeHtml(ymd || ''));
       });
     } catch {}
     lastItems = filtered;
@@ -1921,12 +1931,8 @@ function viewArticle() {
         .map((d) => ({ id: d.id, title: d.data().title, slug: d.data().slug }));
 
       const nextYmd0 = article.srs?.nextDueYmd || '';
-      const todayY = getJstYmd();
-      const dueLabel0 = !nextYmd0
-        ? '未設定'
-        : nextYmd0 <= todayY
-          ? '本日'
-          : `${nextYmd0.slice(0, 4)}-${nextYmd0.slice(4, 6)}-${nextYmd0.slice(6, 8)}`;
+      const info0 = dueInfo(nextYmd0);
+      const dueLabel0 = nextYmd0 ? `${info0.date}（${info0.short}）` : '未設定';
       wrap.innerHTML = `
         <h2 class="title">${article.title}</h2>
         <div class="card" style="background:transparent;border:none;padding:0;">
@@ -1994,11 +2000,8 @@ function viewArticle() {
       const btnPick = qs('#artReadPick', wrap);
       const quicks = qsa('[data-add-day]', wrap);
       const updDisp = (ymd) => {
-        const t = !ymd
-          ? '未設定'
-          : ymd <= getJstYmd()
-            ? '本日'
-            : `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
+        const info = dueInfo(ymd);
+        const t = ymd ? `${info.date}（${info.short}）` : '未設定';
         if (dueDisp) dueDisp.textContent = t;
       };
       btnAuto?.addEventListener('click', async () => {
@@ -2438,17 +2441,11 @@ function viewCreate() {
           items
             .map((it) => {
               const ymd = it.srs?.nextDueYmd || '';
-              const due = !ymd || ymd <= today;
-              const dueTxt = !ymd
-                ? '未設定'
-                : ymd <= today
-                  ? '本日'
-                  : `${ymd.slice(4, 6)}/${ymd.slice(6, 8)}`;
+              const info = dueInfo(ymd);
+              const due = info.cls === 'overdue' || info.cls === 'today' || info.cls === 'unset';
               const klass = due ? 'card qa-card qa-due' : 'card qa-card';
               return `
-          <div class=\"${klass}\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0, 6)})</small> ${
-            due ? '<span class=\\"badge\\">' + dueTxt + '</span>' : ''
-          }</div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <button class=\"btn\" onclick=\"window.CLQ_editQa('${it.id}')\">編集</button>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`;
+          <div class=\"${klass}\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0, 6)})</small> ${dueBadgeHtml(ymd)}</div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <button class=\"btn\" onclick=\"window.CLQ_editQa('${it.id}')\">編集</button>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`;
             })
             .join('') || '<div class="muted">（該当なし）</div>';
       } catch (err) {
