@@ -208,7 +208,30 @@ let fb = {
 };
 
 // ---- ゲーム定数・状態 ----
+// ベースとなるレベル帯の必要XP（レベル2への必要量の目安）
 const LEVEL_SIZE = 80;
+const MAX_LEVEL = 100;
+// レベルが上がるほど必要XPが逓増する簡易カーブ
+// 例: L→L+1 に必要なXP = LEVEL_SIZE * (1 + 0.05*(L-1)) の切り上げ
+function levelCost(lv) {
+  const base = LEVEL_SIZE;
+  const growth = 0.05; // 1レベルごとに+5%
+  const cost = Math.ceil(base * (1 + growth * Math.max(0, lv - 1)));
+  return Math.max(1, cost);
+}
+function levelProgress(totalXp = 0) {
+  let xp = Math.max(0, Number(totalXp) || 0);
+  let level = 1;
+  let cost = levelCost(level);
+  while (xp >= cost && level < MAX_LEVEL) {
+    xp -= cost;
+    level += 1;
+    cost = levelCost(level);
+  }
+  const inLevelXp = xp; // 現在レベル内で獲得済み
+  const toNext = level >= MAX_LEVEL ? 0 : Math.max(0, cost - inLevelXp);
+  return { level, inLevelXp, toNext, costThisLevel: cost };
+}
 // ステ振りテンプレート（1レベル当たり合計10になるよう調整）
 const SETS = [
   [4, 3, 2, 1], // 合計10
@@ -595,7 +618,7 @@ function subscribeUserDoc() {
 
 // ---- ゲームロジック ----
 function computeLevel(totalXp) {
-  return Math.floor((totalXp || 0) / LEVEL_SIZE) + 1;
+  return levelProgress(totalXp).level;
 }
 
 function computeLevelUpIncrements(seed, fromLevelExcl, toLevelIncl) {
@@ -1210,7 +1233,8 @@ function viewHome() {
   const u = state.userDoc;
   const level = u?.level ?? 1;
   const totalXp = u?.totalXp ?? 0;
-  const xpToNext = LEVEL_SIZE - (totalXp % LEVEL_SIZE || 0);
+  const prog = levelProgress(totalXp);
+  const xpToNext = prog.toNext;
   const stats = u?.stats ?? { knowledge: 0, judgment: 0, skill: 0, empathy: 0 };
   const title = levelTitle(level);
   // 今日の復習数（後段で非同期取得して差し替え）
