@@ -404,6 +404,12 @@ async function updateArticleSrsOnRead(articleId, manualYmd = null) {
       updatedAt: serverTimestamp(),
     });
   });
+  // 記事の復習で +2XP（ベストエフォート）
+  try {
+    await awardXp(2);
+  } catch (e) {
+    console.warn('award xp on article review failed', e);
+  }
 }
 
 async function initFirebase() {
@@ -1387,7 +1393,7 @@ async function setupArticles() {
               <div class="muted" style="margin:.25rem 0;">${(it.body || '').slice(0, 80)}</div>
               <div class="row">
                 <a class="btn secondary" href="#/article?slug=${encodeURIComponent(it.slug)}">読む</a>
-                <button class="btn" data-art-read="auto" data-id="${it.id}">読了（自動）</button>
+                <button class="btn" data-art-read="auto" data-id="${it.id}">読了（自動）+2XP</button>
                 <button class="btn secondary" data-art-read="d1" data-id="${it.id}">+1日</button>
                 <button class="btn secondary" data-art-read="d3" data-id="${it.id}">+3日</button>
                 <button class="btn secondary" data-art-read="d7" data-id="${it.id}">+7日</button>
@@ -1417,7 +1423,7 @@ async function setupArticles() {
           const ymd = addDaysToYmd(getJstYmd(), add);
           await updateArticleSrsOnRead(id, ymd);
         }
-        showToast && showToast('次回復習を設定しました');
+        showToast && showToast('次回復習を設定しました: +2XP');
         refreshDueArticles();
       } catch (err) {
         alert('更新に失敗しました: ' + (err?.message || err));
@@ -1891,7 +1897,7 @@ function viewArticle() {
           <div class="row" style="align-items:center;gap:.5rem;flex-wrap:wrap;">
             <div>次回復習: <b id="artDueDisp">${dueLabel0}</b></div>
             <div class="row" style="gap:.35rem;">
-              <button class="btn" id="artReadAuto">読了（自動）</button>
+              <button class="btn" id="artReadAuto">読了（自動）+2XP</button>
               <button class="btn secondary" data-add-day="1">+1日</button>
               <button class="btn secondary" data-add-day="3">+3日</button>
               <button class="btn secondary" data-add-day="7">+7日</button>
@@ -1962,7 +1968,7 @@ function viewArticle() {
           const snap2 = await fb.fs.getDoc(fb.fs.doc(fb.db, 'articles', article.id));
           const ymd = snap2.exists() ? snap2.data().srs?.nextDueYmd || '' : '';
           updDisp(ymd);
-          showToast && showToast('次回復習を設定しました');
+          showToast && showToast('次回復習を設定しました: +2XP');
         } catch (e) {
           alert('更新に失敗しました: ' + (e?.message || e));
         }
@@ -1973,7 +1979,7 @@ function viewArticle() {
         try {
           await updateArticleSrsOnRead(article.id, picked);
           updDisp(picked);
-          showToast && showToast('次回復習を設定しました');
+          showToast && showToast('次回復習を設定しました: +2XP');
         } catch (e) {
           alert('更新に失敗しました: ' + (e?.message || e));
         }
@@ -1985,7 +1991,7 @@ function viewArticle() {
           try {
             await updateArticleSrsOnRead(article.id, ymd);
             updDisp(ymd);
-            showToast && showToast('次回復習を設定しました');
+            showToast && showToast('次回復習を設定しました: +2XP');
           } catch (e) {
             alert('更新に失敗しました: ' + (e?.message || e));
           }
