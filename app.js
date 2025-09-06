@@ -2251,6 +2251,7 @@ function viewCreate() {
             <option value="created">作成日（新しい順）</option>
           </select>
         </label>
+        <button id="qaStartStudy" class="btn">この条件で復習</button>
         <button id="qaClearFilter" class="btn secondary">絞り込み解除</button>
       </div>
       <div id="qaList" class="grid"></div>
@@ -2393,10 +2394,15 @@ function viewCreate() {
         alert('削除に失敗しました: ' + (e?.message || e));
       }
     };
-    // 「この問題で出題」は不要のため機能を提供しません
     window.CLQ_editQa = async (id) => {
       const ok = await openQaEditDialog(id);
       if (ok) refreshQaList();
+    };
+    window.CLQ_reviewQa = (id) => {
+      state.session.filters.qaId = id;
+      state.session.filters.studyMode = 'due';
+      state.session.history = [];
+      location.hash = '#/study';
     };
     async function refreshQaList() {
       const uid = fb.user?.uid;
@@ -2451,7 +2457,7 @@ function viewCreate() {
               const due = info.cls === 'overdue' || info.cls === 'today' || info.cls === 'unset';
               const klass = due ? 'card qa-card qa-due' : 'card qa-card';
               return `
-          <div class=\"${klass}\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0, 6)})</small> ${dueBadgeHtml(ymd)}</div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <button class=\"btn\" onclick=\"window.CLQ_editQa('${it.id}')\">編集</button>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`;
+          <div class=\"${klass}\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0, 6)})</small> ${dueBadgeHtml(ymd)}</div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <button class=\"btn\" onclick=\"window.CLQ_editQa('${it.id}')\">編集</button>\n              <button class=\"btn secondary\" onclick=\"window.CLQ_reviewQa('${it.id}')\">復習</button>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`;
             })
             .join('') || '<div class="muted">（該当なし）</div>';
       } catch (err) {
