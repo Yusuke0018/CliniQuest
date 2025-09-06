@@ -209,7 +209,7 @@ let fb = {
 
 // ---- ゲーム定数・状態 ----
 // ベースとなるレベル帯の必要XP（レベル2への必要量の目安）
-const LEVEL_SIZE = 80;
+const LEVEL_SIZE = 50;
 const MAX_LEVEL = 100;
 // レベルが上がるほど必要XPが逓増する簡易カーブ
 // 例: L→L+1 に必要なXP = LEVEL_SIZE * (1 + 0.05*(L-1)) の切り上げ
