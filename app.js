@@ -2241,6 +2241,13 @@ function viewCreate() {
       <div class="row" style="gap:.5rem; margin-bottom:.5rem; flex-wrap:wrap;">
         <input id="qaSearch" placeholder="問題を検索（Q/Aを対象）" style="flex:1;min-width:240px;"/>
         <input id="qaArticleFilter" placeholder="記事IDで絞込（任意）" style="min-width:200px;"/>
+        <label style="display:inline-flex;align-items:center;gap:.35rem;">
+          <span>並び替え</span>
+          <select id="qaSort">
+            <option value="due">期日（本日優先）</option>
+            <option value="created">作成日（新しい順）</option>
+          </select>
+        </label>
         <button id="qaClearFilter" class="btn secondary">絞り込み解除</button>
       </div>
       <div id="qaList" class="grid"></div>
@@ -2352,6 +2359,7 @@ function viewCreate() {
     const search = qs('#qaSearch');
     const artFilter = qs('#qaArticleFilter');
     const clearBtn = qs('#qaClearFilter');
+    const sortSel = qs('#qaSort');
     if (state.session.filters.articleId) artFilter.value = state.session.filters.articleId;
     clearBtn?.addEventListener('click', (e) => {
       e.preventDefault();
@@ -2365,6 +2373,7 @@ function viewCreate() {
       state.session.filters.articleId = artFilter.value.trim() || null;
       refreshQaList();
     });
+    sortSel?.addEventListener('change', () => refreshQaList());
     window.CLQ_deleteQa = async (id) => {
       if (!confirm('この問題を削除します。よろしいですか？')) return;
       try {
@@ -2393,6 +2402,7 @@ function viewCreate() {
         const qCol = collection(fb.db, 'qas');
         const q = query(qCol, where('uid', '==', uid), limit(100));
         const snap = await getDocs(q);
+        const today = getJstYmd();
         let items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         if (articleId) items = items.filter((it) => (it.articleId || '') === articleId);
         if (term)
@@ -2402,17 +2412,44 @@ function viewCreate() {
               (it.answer || '').toLowerCase().includes(term) ||
               (it.rationale || '').toLowerCase().includes(term),
           );
-        items.sort((a, b) => {
-          const ta = a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : 0;
-          const tb = b.createdAt && b.createdAt.toMillis ? b.createdAt.toMillis() : 0;
-          return tb - ta;
-        });
+        const mode = sortSel?.value || 'due';
+        if (mode === 'created') {
+          items.sort((a, b) => {
+            const ta = a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : 0;
+            const tb = b.createdAt && b.createdAt.toMillis ? b.createdAt.toMillis() : 0;
+            return tb - ta;
+          });
+        } else {
+          // 期日: 本日まで到来のものを優先、続いて期日昇順
+          const key = (it) => {
+            const ymd = it.srs?.nextDueYmd || '';
+            const due = !ymd || ymd <= today ? 1 : 0; // 未設定も「要対応」扱い
+            const ord = ymd || '99999999';
+            return { due, ord };
+          };
+          items.sort((a, b) => {
+            const ka = key(a),
+              kb = key(b);
+            if (kb.due !== ka.due) return kb.due - ka.due; // due=1 を先頭に
+            return (ka.ord || '').localeCompare(kb.ord || '');
+          });
+        }
         listEl.innerHTML =
           items
-            .map(
-              (it) => `
-          <div class=\"card\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0, 6)})</small></div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <button class=\"btn\" onclick=\"window.CLQ_editQa('${it.id}')\">編集</button>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`,
-            )
+            .map((it) => {
+              const ymd = it.srs?.nextDueYmd || '';
+              const due = !ymd || ymd <= today;
+              const dueTxt = !ymd
+                ? '未設定'
+                : ymd <= today
+                  ? '本日'
+                  : `${ymd.slice(4, 6)}/${ymd.slice(6, 8)}`;
+              const klass = due ? 'card qa-card qa-due' : 'card qa-card';
+              return `
+          <div class=\"${klass}\">\n            <div><b>${(it.question || '').slice(0, 80)}</b> <small class=\"muted\">(${it.id.slice(0, 6)})</small> ${
+            due ? '<span class=\\"badge\\">' + dueTxt + '</span>' : ''
+          }</div>\n            <div class=\"muted\" style=\"margin:.25rem 0;\">答え: ${(it.answer || '').slice(0, 80)}</div>\n            <div class=\"row\">\n              <button class=\"btn\" onclick=\"window.CLQ_editQa('${it.id}')\">編集</button>\n              <button class=\"btn ng\" onclick=\"window.CLQ_deleteQa('${it.id}')\">削除</button>\n            </div>\n          </div>`;
+            })
             .join('') || '<div class="muted">（該当なし）</div>';
       } catch (err) {
         console.error('QA一覧の取得に失敗', err);

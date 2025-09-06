@@ -117,6 +117,9 @@ body.dq-font {
 #artReviewList.grid {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
 }
+#qaList.grid {
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
 /* セクション見出し（区切り用） */
 .section-head {
   margin-top: 0.75rem;
@@ -468,6 +471,12 @@ select:focus {
   border-color: var(--accent);
   color: var(--accent);
   background: #eef2ff;
+}
+
+/* QA due highlight */
+.qa-card.qa-due {
+  background: var(--review-bg);
+  border-color: var(--review-border);
 }
 
 /* 記事タイトルのリンク色（ライト/ダークで黄色系） */
