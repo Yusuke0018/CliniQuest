@@ -351,10 +351,59 @@ async function createOrGetArticleByTitle(title) {
     slug,
     body: '',
     tags: [],
+    srs: { reps: 0, ease: 2.5, interval: 0, nextDueYmd: getJstYmd(), lastReviewedAt: null },
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
   return ref.id;
+}
+
+// 記事SRS更新（読了時）: manualYmd 指定で手動日付、未指定なら自動（SM-2簡易）
+async function updateArticleSrsOnRead(articleId, manualYmd = null) {
+  if (!fb.fs) throw new Error('Firestore 未初期化');
+  const { doc, runTransaction, serverTimestamp } = fb.fs;
+  const uid = fb.user?.uid;
+  if (!uid) throw new Error('未サインイン');
+  const ref = doc(fb.db, 'articles', articleId);
+  await runTransaction(fb.db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Article not found');
+    const v = snap.data();
+    if (v.uid !== uid) throw new Error('権限がありません');
+    const cur = v.srs || {
+      reps: 0,
+      ease: 2.5,
+      interval: 0,
+      nextDueYmd: getJstYmd(),
+      lastReviewedAt: null,
+    };
+    let reps = Number(cur.reps || 0);
+    let ease = typeof cur.ease === 'number' ? cur.ease : 2.5;
+    let interval = Number(cur.interval || 0);
+    const today = getJstYmd();
+    if (manualYmd && /^\d{8}$/.test(manualYmd)) {
+      const diff = Math.max(0, ymdDiff(manualYmd, today));
+      reps = Math.max(1, reps + 1);
+      interval = diff || 1;
+      ease = Math.max(1.3, Math.round((ease + 0.02) * 100) / 100);
+      tx.update(ref, {
+        srs: { reps, ease, interval, nextDueYmd: manualYmd, lastReviewedAt: serverTimestamp() },
+        updatedAt: serverTimestamp(),
+      });
+      return;
+    }
+    // 自動（正解扱い）
+    reps += 1;
+    ease = Math.max(1.3, Math.round((ease + 0.02) * 100) / 100);
+    if (reps === 1) interval = 1;
+    else if (reps === 2) interval = 3;
+    else interval = Math.max(1, Math.round(interval * ease));
+    const nextDue = interval > 0 ? addDaysToYmd(today, interval) : today;
+    tx.update(ref, {
+      srs: { reps, ease, interval, nextDueYmd: nextDue, lastReviewedAt: serverTimestamp() },
+      updatedAt: serverTimestamp(),
+    });
+  });
 }
 
 async function initFirebase() {
@@ -640,7 +689,7 @@ function chooseNextDueYmdDialog(initialYmd) {
   });
 }
 
-// 今日の復習数を数える（期日到来 or nextDueYmd 未設定）
+// 今日の復習数を数える（QA: 期日到来 or nextDueYmd 未設定）
 async function countDueToday(limitN = 500) {
   if (!fb.fs) return 0;
   const { collection, getDocs, query, where, limit } = fb.fs;
@@ -649,6 +698,23 @@ async function countDueToday(limitN = 500) {
   const today = getJstYmd();
   const snap = await getDocs(
     query(collection(fb.db, 'qas'), where('uid', '==', uid), limit(limitN)),
+  );
+  return snap.docs.filter((d) => {
+    const srs = d.data().srs;
+    if (!srs || !srs.nextDueYmd) return true;
+    return srs.nextDueYmd <= today;
+  }).length;
+}
+
+// 今日の復習数を数える（記事）
+async function countDueTodayArticles(limitN = 1000) {
+  if (!fb.fs) return 0;
+  const { collection, getDocs, query, where, limit } = fb.fs;
+  const uid = fb.user?.uid;
+  if (!uid) return 0;
+  const today = getJstYmd();
+  const snap = await getDocs(
+    query(collection(fb.db, 'articles'), where('uid', '==', uid), limit(limitN)),
   );
   return snap.docs.filter((d) => {
     const srs = d.data().srs;
@@ -1129,6 +1195,7 @@ function viewHome() {
   const title = levelTitle(level);
   // 今日の復習数（後段で非同期取得して差し替え）
   const dueSpanId = 'dueCount_' + Math.random().toString(36).slice(2, 8);
+  const dueArtSpanId = 'dueArtCount_' + Math.random().toString(36).slice(2, 8);
   const content = `
     ${warn}
     <div class="grid cols-2">
@@ -1138,7 +1205,8 @@ function viewHome() {
         <div><span class="stat">知識</span>${stats.knowledge || 0} <span class="stat">判断力</span>${stats.judgment || 0} <span class="stat">技術</span>${stats.skill || 0} <span class="stat">共感力</span>${stats.empathy || 0}</div>
       </div>
       <div class="card">
-        <div>今日の復習: <b id="${dueSpanId}">-</b> 問</div>
+        <div>今日の復習（問題）: <b id="${dueSpanId}">-</b> 問</div>
+        <div>今日の復習（記事）: <b id="${dueArtSpanId}">-</b> 件</div>
         <div>ストリーク: ${u?.streak?.current ?? 0} 日</div>
       </div>
     </div>
@@ -1152,9 +1220,11 @@ function viewHome() {
   // 非同期で今日の復習数を取得
   setTimeout(async () => {
     try {
-      const n = await countDueToday();
-      const el = document.getElementById(dueSpanId);
-      if (el) el.textContent = String(n);
+      const [n, a] = await Promise.all([countDueToday(), countDueTodayArticles()]);
+      const el1 = document.getElementById(dueSpanId);
+      if (el1) el1.textContent = String(n);
+      const el2 = document.getElementById(dueArtSpanId);
+      if (el2) el2.textContent = String(a);
     } catch {}
   }, 0);
   return div;
@@ -1178,8 +1248,11 @@ function viewArticles() {
       <label style="display:inline-flex;align-items:center;gap:.35rem;margin:.25rem 0;"><input id="artRelAutoInsert" type="checkbox"/> 本文に [[タイトル]] を自動挿入（未包含のみ）</label>
       <div id="artRelList" class="grid" style="margin-top:.5rem;"></div>
     </details>
+    <details class="card" id="artReviewPane" style="margin-top:.75rem;" open><summary>本日復習（記事）</summary>
+      <div id="artReviewList" class="grid" style="margin-top:.5rem;"></div>
+    </details>
     <div id="artList" class="grid" style="margin-top:1rem;"></div>
-    <details class="card" id="artSearchPane" style="margin-top:.75rem;"><summary>記事を検索</summary>
+    <details class="card" id="artSearchPane" style="margin-top:.75rem;" open><summary>記事を検索</summary>
       <div class="row" style="gap:.5rem;flex-wrap:wrap;margin-top:.5rem;">
         <input id="artSearch" placeholder="記事を検索（タイトル/本文）" style="flex:1;min-width:240px;"/>
       </div>
@@ -1195,6 +1268,7 @@ async function setupArticles() {
   const listEl = qs('#artList');
   const form = qs('#artForm');
   const search = qs('#artSearch');
+  const reviewList = qs('#artReviewList');
   let selectedTag = '';
   let tagsEl = qs('#artTags') || null;
   // 並び替えセレクト（更新順/タイトル/リンク数）
@@ -1275,6 +1349,80 @@ async function setupArticles() {
   }
   relSearchC?.addEventListener('input', () => renderRelCreateList());
   renderRelCreateList();
+  // 本日復習（記事）リスト
+  async function refreshDueArticles() {
+    try {
+      if (!reviewList) return;
+      const uidNow = fb.user?.uid;
+      if (!uidNow) return;
+      reviewList.innerHTML = '<div class="muted">読み込み中...</div>';
+      const snap = await getDocs(query(collection(fb.db, 'articles'), where('uid', '==', uidNow)));
+      const today = getJstYmd();
+      const items = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((it) => {
+          const s = it.srs;
+          if (!s || !s.nextDueYmd) return true;
+          return s.nextDueYmd <= today;
+        })
+        .sort((a, b) => {
+          const an = a.srs?.nextDueYmd || '';
+          const bn = b.srs?.nextDueYmd || '';
+          return (an || '00000000').localeCompare(bn || '00000000');
+        })
+        .slice(0, 24);
+      reviewList.innerHTML =
+        items
+          .map((it) => {
+            const ymd = it.srs?.nextDueYmd;
+            const dueTxt = !ymd
+              ? '未設定'
+              : ymd <= today
+                ? '本日'
+                : `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
+            return `
+            <div class="card" data-article-id="${it.id}">
+              <div><b><a class="article-title" href="#/article?slug=${encodeURIComponent(it.slug)}">${it.title}</a></b> <small class="muted">(${it.id.slice(0, 6)})</small> <span class="badge">${dueTxt}</span></div>
+              <div class="muted" style="margin:.25rem 0;">${(it.body || '').slice(0, 80)}</div>
+              <div class="row">
+                <a class="btn secondary" href="#/article?slug=${encodeURIComponent(it.slug)}">読む</a>
+                <button class="btn" data-art-read="auto" data-id="${it.id}">読了（自動）</button>
+                <button class="btn secondary" data-art-read="d1" data-id="${it.id}">+1日</button>
+                <button class="btn secondary" data-art-read="d3" data-id="${it.id}">+3日</button>
+                <button class="btn secondary" data-art-read="d7" data-id="${it.id}">+7日</button>
+                <button class="btn secondary" data-art-read="pick" data-id="${it.id}">日付指定</button>
+              </div>
+            </div>`;
+          })
+          .join('') || '<div class="muted">（本日復習はありません）</div>';
+    } catch (e) {
+      if (reviewList) reviewList.innerHTML = '<div class="muted">読み込みに失敗しました</div>';
+    }
+  }
+  if (reviewList) {
+    reviewList.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-art-read]');
+      if (!btn) return;
+      const id = btn.getAttribute('data-id');
+      const mode = btn.getAttribute('data-art-read');
+      try {
+        if (mode === 'auto') {
+          await updateArticleSrsOnRead(id);
+        } else if (mode === 'pick') {
+          const picked = await chooseNextDueYmdDialog(getJstYmd());
+          if (picked) await updateArticleSrsOnRead(id, picked);
+        } else if (/^d\d+$/.test(mode)) {
+          const add = Number(mode.slice(1));
+          const ymd = addDaysToYmd(getJstYmd(), add);
+          await updateArticleSrsOnRead(id, ymd);
+        }
+        showToast && showToast('次回復習を設定しました');
+        refreshDueArticles();
+      } catch (err) {
+        alert('更新に失敗しました: ' + (err?.message || err));
+      }
+    });
+  }
   // グラフ表示のUIとオーバーレイ（SVG）を動的に用意
   let graphOn = false;
   function ensureGraphUi() {
@@ -1388,6 +1536,7 @@ async function setupArticles() {
     const snap = await getDocs(query(collection(fb.db, 'articles'), where('uid', '==', uidNow)));
     const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     const term = (search?.value || '').trim().toLowerCase();
+    const today = getJstYmd();
     // Tag cloud + filter
     try {
       const tags = new Map();
@@ -1486,8 +1635,17 @@ async function setupArticles() {
     try {
       const cards = Array.from(listEl.querySelectorAll('.card'));
       cards.forEach((el, i) => {
-        const id = filtered[i]?.id || '';
+        const it = filtered[i];
+        if (!it) return;
+        const id = it.id || '';
         if (id) el.setAttribute('data-article-id', id);
+        const ymd = it.srs?.nextDueYmd;
+        if (ymd) {
+          const dueTxt = ymd <= today ? '本日' : `${ymd.slice(4, 6)}/${ymd.slice(6, 8)}`;
+          const header = el.querySelector('div');
+          if (header)
+            header.insertAdjacentHTML('beforeend', ` <span class="badge">${dueTxt}</span>`);
+        }
       });
     } catch {}
     lastItems = filtered;
@@ -1568,6 +1726,7 @@ async function setupArticles() {
         body: bodyToSave,
         tags,
         links: Array.from(relSelectedCreate),
+        srs: { reps: 0, ease: 2.5, interval: 0, nextDueYmd: getJstYmd(), lastReviewedAt: null },
         createdXpAwarded: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -1610,7 +1769,9 @@ async function setupArticles() {
             const seed = uBefore.seed ?? (fb.user?.uid ? seedFromUid(fb.user.uid) : 0);
             const inc = computeLevelUpIncrements(seed, prevLevel, newLevel);
             showLevelUpEffect({ prevLevel, newLevel, inc });
-          } catch (e4) { console.warn('levelup effect error (create)', e4); }
+          } catch (e4) {
+            console.warn('levelup effect error (create)', e4);
+          }
         }
       } catch (e3) {
         console.warn('記事作成時のXP付与に失敗', e3);
@@ -1626,6 +1787,7 @@ async function setupArticles() {
   });
   search?.addEventListener('input', () => refresh());
   refresh();
+  refreshDueArticles();
 }
 
 function escapeRegExp(s) {
@@ -1712,10 +1874,29 @@ function viewArticle() {
         })
         .map((d) => ({ id: d.id, title: d.data().title, slug: d.data().slug }));
 
+      const nextYmd0 = article.srs?.nextDueYmd || '';
+      const todayY = getJstYmd();
+      const dueLabel0 = !nextYmd0
+        ? '未設定'
+        : nextYmd0 <= todayY
+          ? '本日'
+          : `${nextYmd0.slice(0, 4)}-${nextYmd0.slice(4, 6)}-${nextYmd0.slice(6, 8)}`;
       wrap.innerHTML = `
         <h2 class="title">${article.title}</h2>
         <div class="card" style="background:transparent;border:none;padding:0;">
           <div id="articleBodyHtml">${html}</div>
+        </div>
+        <div class="card" style="margin-top:.75rem;">
+          <div class="row" style="align-items:center;gap:.5rem;flex-wrap:wrap;">
+            <div>次回復習: <b id="artDueDisp">${dueLabel0}</b></div>
+            <div class="row" style="gap:.35rem;">
+              <button class="btn" id="artReadAuto">読了（自動）</button>
+              <button class="btn secondary" data-add-day="1">+1日</button>
+              <button class="btn secondary" data-add-day="3">+3日</button>
+              <button class="btn secondary" data-add-day="7">+7日</button>
+              <button class="btn secondary" id="artReadPick">日付指定</button>
+            </div>
+          </div>
         </div>
         <details class="card" style="margin-top:.75rem;"><summary>この記事を編集</summary>
           <div class="field" style="margin-top:.5rem;">
@@ -1761,6 +1942,54 @@ function viewArticle() {
       const relSearch = qs('#relSearch', wrap);
       const relList = qs('#relList', wrap);
       let relSelected = new Set(Array.isArray(article.links) ? article.links : []);
+      // 復習ボタンの挙動
+      const dueDisp = qs('#artDueDisp', wrap);
+      const btnAuto = qs('#artReadAuto', wrap);
+      const btnPick = qs('#artReadPick', wrap);
+      const quicks = qsa('[data-add-day]', wrap);
+      const updDisp = (ymd) => {
+        const t = !ymd
+          ? '未設定'
+          : ymd <= getJstYmd()
+            ? '本日'
+            : `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
+        if (dueDisp) dueDisp.textContent = t;
+      };
+      btnAuto?.addEventListener('click', async () => {
+        try {
+          await updateArticleSrsOnRead(article.id);
+          const snap2 = await fb.fs.getDoc(fb.fs.doc(fb.db, 'articles', article.id));
+          const ymd = snap2.exists() ? snap2.data().srs?.nextDueYmd || '' : '';
+          updDisp(ymd);
+          showToast && showToast('次回復習を設定しました');
+        } catch (e) {
+          alert('更新に失敗しました: ' + (e?.message || e));
+        }
+      });
+      btnPick?.addEventListener('click', async () => {
+        const picked = await chooseNextDueYmdDialog(getJstYmd());
+        if (!picked) return;
+        try {
+          await updateArticleSrsOnRead(article.id, picked);
+          updDisp(picked);
+          showToast && showToast('次回復習を設定しました');
+        } catch (e) {
+          alert('更新に失敗しました: ' + (e?.message || e));
+        }
+      });
+      quicks.forEach((el) =>
+        el.addEventListener('click', async () => {
+          const add = Number(el.getAttribute('data-add-day') || '0');
+          const ymd = addDaysToYmd(getJstYmd(), add || 1);
+          try {
+            await updateArticleSrsOnRead(article.id, ymd);
+            updDisp(ymd);
+            showToast && showToast('次回復習を設定しました');
+          } catch (e) {
+            alert('更新に失敗しました: ' + (e?.message || e));
+          }
+        }),
+      );
       // 編集用タグサジェスト
       try {
         const tagsArea = qs('#editTagsAuto', wrap);
@@ -1878,9 +2107,13 @@ function viewArticle() {
                 const seed = uBefore.seed ?? (fb.user?.uid ? seedFromUid(fb.user.uid) : 0);
                 const inc = computeLevelUpIncrements(seed, prevLevel, newLevel);
                 showLevelUpEffect({ prevLevel, newLevel, inc });
-              } catch (e3) { console.warn('levelup effect error (save)', e3); }
+              } catch (e3) {
+                console.warn('levelup effect error (save)', e3);
+              }
             }
-          } catch (e2) { console.warn('記事保存時のXP付与に失敗（継続）', e2); }
+          } catch (e2) {
+            console.warn('記事保存時のXP付与に失敗（継続）', e2);
+          }
           // 再描画
           showToast && showToast('記事を保存しました: +5XP');
           location.hash = `#/article?slug=${encodeURIComponent(article.slug)}`;
@@ -2409,7 +2642,11 @@ function setupStudy() {
   );
   ok.onclick = async () => {
     try {
-      const uBefore = state.userDoc || { level: 1, totalXp: 0, stats: { knowledge: 0, judgment: 0, skill: 0, empathy: 0 } };
+      const uBefore = state.userDoc || {
+        level: 1,
+        totalXp: 0,
+        stats: { knowledge: 0, judgment: 0, skill: 0, empathy: 0 },
+      };
       const prevLevel = uBefore.level || 1;
       const { isCritical, gain, leveledUp, levelAfter } = await awardCorrectXpAndUpdate(1);
       // SRS 更新（正解）: 次回復習タイミングをカレンダーで指定可能
@@ -2464,7 +2701,9 @@ function setupStudy() {
           const seed = uBefore.seed ?? (fb.user?.uid ? seedFromUid(fb.user.uid) : 0);
           const inc = computeLevelUpIncrements(seed, prevLevel, levelAfter);
           showLevelUpEffect({ prevLevel, newLevel: levelAfter, inc });
-        } catch (e2) { console.warn('levelup effect error (study)', e2); }
+        } catch (e2) {
+          console.warn('levelup effect error (study)', e2);
+        }
       }
       const line2 = leveledUp ? `<div>レベルが あがった！</div>` : '';
       log.innerHTML = line1 + line2;
@@ -2682,7 +2921,12 @@ function showLevelUpEffect({ prevLevel, newLevel, inc }) {
     card.className = 'levelup-card';
     const name = (state.userDoc?.displayName || 'ゆうすけ').toString();
     const title = levelTitle(newLevel);
-    const statName = { knowledge: 'ちりょく', judgment: 'はんだんりょく', skill: 'ぎじゅつ', empathy: 'きょうかんりょく' };
+    const statName = {
+      knowledge: 'ちりょく',
+      judgment: 'はんだんりょく',
+      skill: 'ぎじゅつ',
+      empathy: 'きょうかんりょく',
+    };
 
     const plainLines = [];
     const finalHtmlLines = [];
@@ -2734,7 +2978,9 @@ function showLevelUpEffect({ prevLevel, newLevel, inc }) {
     let typing = true;
     let totalMs = 0;
     let audioCtx = null;
-    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch {}
     const beep = () => {
       try {
         if (!audioCtx) return;
@@ -2743,32 +2989,47 @@ function showLevelUpEffect({ prevLevel, newLevel, inc }) {
         o.type = 'square';
         o.frequency.value = 920 + Math.random() * 40;
         g.gain.value = 0.02;
-        o.connect(g); g.connect(audioCtx.destination);
-        o.start(); o.stop(audioCtx.currentTime + 0.05);
+        o.connect(g);
+        g.connect(audioCtx.destination);
+        o.start();
+        o.stop(audioCtx.currentTime + 0.05);
       } catch {}
     };
-    const typeLine = (text, klass = '') => new Promise((resolve) => {
-      const el = document.createElement('div');
-      el.className = 'lvline ' + klass;
-      list.appendChild(el);
-      let i = 0;
-      const speed = 18;
-      const timer = setInterval(() => {
-        if (skipNow) {
-          clearInterval(timer);
-          el.textContent = text;
-          resolve();
-          return;
-        }
-        el.textContent = text.slice(0, ++i);
-        if (i % 3 === 0) beep();
-        if (i >= text.length) { clearInterval(timer); resolve(); }
-      }, speed);
-    });
+    const typeLine = (text, klass = '') =>
+      new Promise((resolve) => {
+        const el = document.createElement('div');
+        el.className = 'lvline ' + klass;
+        list.appendChild(el);
+        let i = 0;
+        const speed = 18;
+        const timer = setInterval(() => {
+          if (skipNow) {
+            clearInterval(timer);
+            el.textContent = text;
+            resolve();
+            return;
+          }
+          el.textContent = text.slice(0, ++i);
+          if (i % 3 === 0) beep();
+          if (i >= text.length) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, speed);
+      });
 
     (async () => {
       for (let idx = 0; idx < plainLines.length; idx++) {
-        const klass = idx === 0 ? 'lvbanner' : (idx === 1 ? '' : (finalHtmlLines[idx]?.includes('lvtitle') ? 'lvtitle' : (finalHtmlLines[idx]?.includes('lvstats') ? 'lvstats' : '')));
+        const klass =
+          idx === 0
+            ? 'lvbanner'
+            : idx === 1
+              ? ''
+              : finalHtmlLines[idx]?.includes('lvtitle')
+                ? 'lvtitle'
+                : finalHtmlLines[idx]?.includes('lvstats')
+                  ? 'lvstats'
+                  : '';
         await typeLine(plainLines[idx], klass);
         totalMs += Math.max(plainLines[idx].length * 18 + 100, 360);
       }
