@@ -1235,6 +1235,9 @@ function viewHome() {
       <a class="btn secondary" href="#/create">新規作問</a>
       <a class="btn secondary" href="#/articles">記事を編集</a>
     </div>
+    <div class="row" style="margin-top:.5rem;">
+      <button id="debugLvUp" class="btn secondary">デバッグ: レベルUP演出</button>
+    </div>
   `;
   div.appendChild(panel('ホーム', content));
   // 非同期で今日の復習数を取得
@@ -1245,6 +1248,23 @@ function viewHome() {
       if (el1) el1.textContent = String(n);
       const el2 = document.getElementById(dueArtSpanId);
       if (el2) el2.textContent = String(a);
+    } catch {}
+    // Debug: レベルアップ演出のみ（XP/DB変更なし）
+    try {
+      const btn = document.getElementById('debugLvUp');
+      btn?.addEventListener('click', () => {
+        try {
+          const u = state.userDoc || {};
+          const prevLevel = Math.max(1, Math.floor(Math.random() * 95) + 1); // 1..95
+          const incLv = 1 + Math.floor(Math.random() * 5); // +1..+5
+          const newLevel = Math.min(prevLevel + incLv, 100);
+          const seed = u.seed ?? (fb.user?.uid ? seedFromUid(fb.user.uid) : seedFromUid('debug'));
+          const inc = computeLevelUpIncrements(seed, prevLevel, newLevel);
+          showLevelUpEffect({ prevLevel, newLevel, inc });
+        } catch (e) {
+          console.warn('debug levelup failed', e);
+        }
+      });
     } catch {}
   }, 0);
   return div;
