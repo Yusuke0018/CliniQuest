@@ -1248,9 +1248,10 @@ function viewArticles() {
       <label style="display:inline-flex;align-items:center;gap:.35rem;margin:.25rem 0;"><input id="artRelAutoInsert" type="checkbox"/> 本文に [[タイトル]] を自動挿入（未包含のみ）</label>
       <div id="artRelList" class="grid" style="margin-top:.5rem;"></div>
     </details>
-    <details class="card" id="artReviewPane" style="margin-top:.75rem;" open><summary>本日復習（記事）</summary>
+    <details class="card review-pane" id="artReviewPane" style="margin-top:.75rem;" open><summary>本日復習（記事）</summary>
       <div id="artReviewList" class="grid" style="margin-top:.5rem;"></div>
     </details>
+    <div class="section-head" id="artListHead"><span>記事一覧</span></div>
     <div id="artList" class="grid" style="margin-top:1rem;"></div>
     <details class="card" id="artSearchPane" style="margin-top:.75rem;" open><summary>記事を検索</summary>
       <div class="row" style="gap:.5rem;flex-wrap:wrap;margin-top:.5rem;">

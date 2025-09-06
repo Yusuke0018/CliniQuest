@@ -112,6 +112,24 @@ body.dq-font {
 #artReviewList.grid {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
 }
+/* セクション見出し（区切り用） */
+.section-head {
+  margin-top: 0.75rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  color: var(--text);
+}
+.section-head span {
+  font-weight: 600;
+}
+/* 本日復習（記事）セクションの視認性向上 */
+details.review-pane {
+  background: var(--panel-2);
+  border-left: 4px solid var(--accent);
+}
 .grid.cols-2 {
   grid-template-columns: 1fr 1fr;
 }
@@ -617,4 +635,13 @@ select:focus {
 /* details/summary 可読性 */
 [data-theme='dark'] details summary {
   color: var(--text);
+}
+/* Dark: セクション見出し/復習セクション */
+[data-theme='dark'] .section-head {
+  background: #0f254a;
+  border-color: #2a59a8;
+}
+[data-theme='dark'] details.review-pane {
+  background: #0f254a;
+  border-left-color: #ffd55e;
 }
