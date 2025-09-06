@@ -2011,8 +2011,9 @@ function viewArticle() {
           if (ymd)
             showToast &&
               showToast(`次回復習: ${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`);
-          // ページを閉じる（一覧へ戻る）
-          setTimeout(() => (location.hash = '#/articles'), 50);
+          // 一覧へ戻る
+          location.hash = '#/articles';
+          render();
         } catch (e) {
           alert('更新に失敗しました: ' + (e?.message || e));
         }
@@ -2028,7 +2029,8 @@ function viewArticle() {
             showToast(
               `次回復習: ${picked.slice(0, 4)}-${picked.slice(4, 6)}-${picked.slice(6, 8)}`,
             );
-          setTimeout(() => (location.hash = '#/articles'), 50);
+          location.hash = '#/articles';
+          render();
         } catch (e) {
           alert('更新に失敗しました: ' + (e?.message || e));
         }
@@ -2043,7 +2045,8 @@ function viewArticle() {
             showToast && showToast('記事復習: +2XP 獲得！');
             showToast &&
               showToast(`次回復習: ${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`);
-            setTimeout(() => (location.hash = '#/articles'), 50);
+            location.hash = '#/articles';
+            render();
           } catch (e) {
             alert('更新に失敗しました: ' + (e?.message || e));
           }
